@@ -78,6 +78,7 @@ if deps_available
       user.memory.add("prefers concise answers")
       results = user.memory.recall("prefers concise answers", limit: 1)
 
+      expect(results).not_to be_empty, "expected recall to return at least one result"
       expect(results.first.content).to eq("prefers concise answers")
       expect(Engram::MemoryRecord.where(scope: "user:#{user.id}").count).to eq(1)
     end

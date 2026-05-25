@@ -10,7 +10,7 @@ RSpec.describe "LLM JSON schemas (OpenAI strict structured outputs)" do
   # Yields [path, object] for every object node in a JSON schema.
   def each_object(node, path = "root", &block)
     if node.is_a?(Hash)
-      block.call(path, node) if node[:type] == "object"
+      block.call(path, node) if Array(node[:type]).include?("object")
       node.each { |key, value| each_object(value, "#{path}.#{key}", &block) }
     elsif node.is_a?(Array)
       node.each_with_index { |value, i| each_object(value, "#{path}[#{i}]", &block) }
