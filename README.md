@@ -126,9 +126,9 @@ ENGRAM_EMBEDDER=ruby_llm ruby eval/run.rb   # needs the ruby_llm gem + an API ke
 
 ## Roadmap
 
-- v0.1 — recall + inject foundation, adapters, Rails + RubyLLM integration. ✅
-- v0.2 — extract → consolidate (ADD / UPDATE / FORGET), background jobs. ✅
-- later — reranking & decay, memory types per policy, additional storage backends, eval benchmarks.
+- v0.1 (done): recall + inject foundation, adapters, Rails + RubyLLM integration.
+- v0.2 (done): extract and consolidate (ADD / UPDATE / FORGET), background jobs.
+- later: reranking and decay, memory types per policy, additional storage backends, eval benchmarks.
 
 ## License
 
