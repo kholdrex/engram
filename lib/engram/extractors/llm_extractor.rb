@@ -16,20 +16,26 @@ module Engram
         Return an empty list if there is nothing worth remembering.
       PROMPT
 
+      # Shaped for OpenAI strict structured outputs: every object sets
+      # additionalProperties: false and lists all of its properties in `required`. The
+      # extractor still defends against missing/empty fields, so requiring them here only
+      # constrains the model's output, it does not change downstream behaviour.
       SCHEMA = {
         type: "object",
+        additionalProperties: false,
         properties: {
           facts: {
             type: "array",
             items: {
               type: "object",
+              additionalProperties: false,
               properties: {
                 content: {type: "string"},
                 kind: {type: "string", enum: %w[semantic episodic preference]},
                 importance: {type: "number"},
                 confidence: {type: "number"}
               },
-              required: %w[content]
+              required: %w[content kind importance confidence]
             }
           }
         },

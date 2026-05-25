@@ -5,7 +5,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-## [0.3.0] — idempotency, smarter recall, forgetting
+## [0.3.0] - 2026-05-25 — idempotency, smarter recall, forgetting
 
 ### Added
 - Idempotent observation: `ProcessedTurns` port, `InMemoryProcessedTurns`,
@@ -14,6 +14,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   blended on top of vector similarity (defaults keep plain similarity search).
 - `touch_on_recall` and `MemoryStore#touch` to update `last_accessed_at` on recall.
 - `UseCases::Forget` and `Memory#forget_stale` to prune memories by age and importance.
+
+### Fixed
+- Extractor and consolidator JSON schemas now satisfy OpenAI strict structured outputs
+  (`additionalProperties: false`, every property in `required`, nullable `target_id`), so the
+  RubyLLM + OpenAI path works end to end. A schema-conformance spec guards against regressions.
 
 ## [0.2.0] — extract → consolidate
 
