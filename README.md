@@ -6,9 +6,9 @@ Engram lets an agent remember a user across sessions. It recalls the facts relev
 current message and injects them into the prompt, so the model stops asking the same
 questions twice. No external memory-as-a-service: your memories live in your database.
 
-> Status: early but real. v0.1 shipped the recall + inject foundation; v0.2 adds the
-> extract → consolidate pipeline that turns raw conversations into durable memories
-> automatically.
+> Status: pre-1.0. Two things are implemented and tested: recall with prompt injection
+> (v0.1), and extracting and consolidating memories from conversations (v0.2). The public
+> API may still change before 1.0.
 
 ## Why
 
