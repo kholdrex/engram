@@ -34,6 +34,18 @@ jobs:
           bundler-cache: true
       - run: bundle exec rspec
 
+  eval:
+    runs-on: ubuntu-latest
+    env:
+      BUNDLE_WITHOUT: integration
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+          bundler-cache: true
+      - run: bundle exec rake eval
+
   integration:
     runs-on: ubuntu-latest
     services:

@@ -11,7 +11,7 @@ rescue LoadError
   # standard not installed; lint task unavailable
 end
 
-desc "Run the recall quality eval (precision@k)"
+desc "Run the local Engram quality eval harness"
 task :eval do
   ruby "eval/run.rb"
 end
