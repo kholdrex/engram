@@ -24,7 +24,9 @@ Gem::Specification.new do |spec|
   spec.metadata["changelog_uri"] = "#{spec.homepage}/blob/main/CHANGELOG.md"
   spec.metadata["rubygems_mfa_required"] = "true"
 
-  spec.files = Dir.glob("lib/**/*.rb") + %w[README.md LICENSE.txt CHANGELOG.md]
+  # Include Ruby sources and the Rails generator templates (*.rb.tt), which the
+  # install generator copies into the host app. A plain *.rb glob would drop them.
+  spec.files = Dir.glob("lib/**/*.{rb,tt}") + %w[README.md LICENSE.txt CHANGELOG.md]
   spec.require_paths = ["lib"]
 
   # NOTE: deliberately zero hard runtime dependencies — the pure core needs nothing.
