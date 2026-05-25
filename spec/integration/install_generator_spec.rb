@@ -20,11 +20,12 @@ if deps_available
   RSpec.describe Engram::Generators::InstallGenerator, :integration do
     let(:destination) { File.expand_path("../../tmp/generator_spec", __dir__) }
     let(:generator_args) { [] }
+    let(:generator_opts) { {} }
 
     before do
       FileUtils.rm_rf(destination)
       FileUtils.mkdir_p(destination)
-      described_class.new(generator_args, {}, destination_root: destination).invoke_all
+      described_class.new(generator_args, generator_opts, destination_root: destination).invoke_all
     end
 
     after { FileUtils.rm_rf(destination) }
@@ -51,7 +52,7 @@ if deps_available
     end
 
     context "with a custom --dimensions option" do
-      let(:generator_args) { ["--dimensions=768"] }
+      let(:generator_opts) { {dimensions: 768} }
 
       it "uses the requested embedding size in the migration" do
         expect(migration_contents).to include("t.vector :embedding, limit: 768")
