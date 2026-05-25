@@ -19,24 +19,26 @@ if deps_available
 
   RSpec.describe Engram::Generators::InstallGenerator, :integration do
     let(:destination) { File.expand_path("../../tmp/generator_spec", __dir__) }
-    let(:generator_args) { [] }
     let(:generator_opts) { {} }
 
     before do
       FileUtils.rm_rf(destination)
       FileUtils.mkdir_p(destination)
-      described_class.new(generator_args, generator_opts, destination_root: destination).invoke_all
+      described_class.new([], generator_opts, destination_root: destination).invoke_all
     end
 
     after { FileUtils.rm_rf(destination) }
 
+    def migration_path
+      Dir[File.join(destination, "db/migrate/*_create_engram_memories.rb")].first
+    end
+
     def migration_contents
-      path = Dir[File.join(destination, "db/migrate/*_create_engram_memories.rb")].first
-      expect(path).not_to be_nil
-      File.read(path)
+      File.read(migration_path)
     end
 
     it "creates the migration for the engram_memories table" do
+      expect(migration_path).not_to be_nil, "expected migration file to be generated but none was found"
       expect(migration_contents).to include("create_table :engram_memories")
       expect(migration_contents).to include("t.vector :embedding, limit: 1536")
     end
@@ -55,6 +57,7 @@ if deps_available
       let(:generator_opts) { {dimensions: 768} }
 
       it "uses the requested embedding size in the migration" do
+        expect(migration_path).not_to be_nil, "expected migration file to be generated but none was found"
         expect(migration_contents).to include("t.vector :embedding, limit: 768")
       end
     end
