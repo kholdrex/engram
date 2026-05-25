@@ -30,4 +30,17 @@ RSpec.describe Engram::Extractors::LLMExtractor do
     extractor.extract(messages: [{role: "user", content: "hello"}], scope: "u:1")
     expect(completion.calls.first[:user]).to include("user: hello")
   end
+
+  it "supports instruction as an explicit memory kind" do
+    completion = Engram::Adapters::FakeCompletion.new(responses: [
+      {"facts" => [
+        {"content" => "User wants direct answers", "kind" => "instruction", "importance" => 0.8, "confidence" => 0.9}
+      ]}
+    ])
+    extractor = described_class.new(completion: completion, embedder: embedder)
+
+    record = extractor.extract(messages: ["Be direct"], scope: "u:1").first
+
+    expect(record.kind).to eq(:instruction)
+  end
 end

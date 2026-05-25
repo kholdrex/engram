@@ -7,7 +7,7 @@ class CreateEngramMemories < ActiveRecord::Migration[<%= migration_version %>]
     create_table :engram_memories do |t|
       t.string :scope, null: false
       t.text :content, null: false
-      t.string :kind, null: false, default: "semantic"
+      t.string :kind, null: false, default: "fact"
       t.float :importance, null: false, default: 1.0
       t.jsonb :metadata, null: false, default: {}
       t.vector :embedding, limit: <%= dimensions %>

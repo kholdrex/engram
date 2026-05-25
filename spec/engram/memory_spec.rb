@@ -17,6 +17,25 @@ RSpec.describe Engram::Memory do
     expect(record.embedding).to eq(embedder.embed("hello"))
   end
 
+  it "applies the default persistence policy on add" do
+    result = memory.add("User API key is sk-test-secret")
+
+    expect(result).to be_nil
+    expect(memory.all).to be_empty
+  end
+
+  it "applies the configured before_persist hook on add" do
+    Engram.config.before_persist = lambda do |record|
+      record.with(content: record.content.gsub("billing@example.test", "[REDACTED]"))
+    end
+
+    record = memory.add("User billing email is billing@example.test")
+
+    expect(record.content).to eq("User billing email is [REDACTED]")
+    expect(record.embedding).to eq(embedder.embed("User billing email is [REDACTED]"))
+    expect(memory.all.map(&:content)).to eq(["User billing email is [REDACTED]"])
+  end
+
   it "injects recalled memories into a prompt" do
     memory.add("likes short answers")
     out = memory.inject_into("Reply to the user.", query: "likes short answers")

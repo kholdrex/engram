@@ -49,6 +49,17 @@ RSpec.describe Engram::UseCases::Observe do
     expect(store.all(scope: "u:1")).to be_empty
   end
 
+  it "applies the persistence policy before storing observed memories" do
+    completion = Engram::Adapters::FakeCompletion.new(responses: [extraction("User API key is sk-test-secret")])
+    consolidator = Engram::Consolidators::HeuristicConsolidator.new(store: store)
+
+    decisions = described_class.new(store: store, extractor: extractor_for(completion), consolidator: consolidator)
+      .call(messages: ["my API key is sk-test-secret"], scope: "u:1")
+
+    expect(decisions.map(&:action)).to eq([:add])
+    expect(store.all(scope: "u:1")).to be_empty
+  end
+
   it "skips a turn already processed under the same idempotency key" do
     completion = Engram::Adapters::FakeCompletion.new(responses: [extraction("User likes tea")])
     consolidator = Engram::Consolidators::HeuristicConsolidator.new(store: store)

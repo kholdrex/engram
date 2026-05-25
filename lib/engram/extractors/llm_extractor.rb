@@ -12,6 +12,8 @@ module Engram
         - Only stable facts about the user (preferences, attributes, decisions, history).
         - Ignore ephemeral chit-chat, questions, and the assistant's own messages.
         - Normalize each fact to a terse third-person statement (e.g. "User is on the Pro plan").
+        - Classify kind as fact, preference, instruction, or episodic.
+        - Do not extract secrets, API keys, passwords, tokens, or transient task progress.
         - Set confidence in [0,1]; importance in [0,1].
         Return an empty list if there is nothing worth remembering.
       PROMPT
@@ -31,7 +33,7 @@ module Engram
               additionalProperties: false,
               properties: {
                 content: {type: "string"},
-                kind: {type: "string", enum: %w[semantic episodic preference]},
+                kind: {type: "string", enum: %w[fact preference instruction episodic semantic]},
                 importance: {type: "number"},
                 confidence: {type: "number"}
               },
@@ -59,8 +61,9 @@ module Engram
           Engram::Record.new(
             content: content,
             scope: scope,
-            kind: (fact["kind"] || "semantic").to_sym,
+            kind: fact["kind"] || "fact",
             importance: (fact["importance"] || 1.0).to_f,
+            metadata: {confidence: (fact["confidence"] || 1.0).to_f},
             embedding: @embedder.embed(content)
           )
         end
