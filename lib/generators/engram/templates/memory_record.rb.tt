@@ -1,0 +1,9 @@
+# frozen_string_literal: true
+
+module Engram
+  class MemoryRecord < ApplicationRecord
+    self.table_name = "engram_memories"
+
+    has_neighbors :embedding
+  end
+end

@@ -1,0 +1,85 @@
+# frozen_string_literal: true
+
+module Engram
+  module Extractors
+    # Derives durable, user-specific facts from a conversation turn via an LLM.
+    class LLMExtractor
+      include Ports::Extractor
+
+      SYSTEM = <<~PROMPT
+        You extract durable, user-specific facts worth remembering across future sessions.
+        Rules:
+        - Only stable facts about the user (preferences, attributes, decisions, history).
+        - Ignore ephemeral chit-chat, questions, and the assistant's own messages.
+        - Normalize each fact to a terse third-person statement (e.g. "User is on the Pro plan").
+        - Set confidence in [0,1]; importance in [0,1].
+        Return an empty list if there is nothing worth remembering.
+      PROMPT
+
+      SCHEMA = {
+        type: "object",
+        properties: {
+          facts: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                content: {type: "string"},
+                kind: {type: "string", enum: %w[semantic episodic preference]},
+                importance: {type: "number"},
+                confidence: {type: "number"}
+              },
+              required: %w[content]
+            }
+          }
+        },
+        required: %w[facts]
+      }.freeze
+
+      def initialize(completion:, embedder:, min_confidence: 0.5)
+        @completion = completion
+        @embedder = embedder
+        @min_confidence = min_confidence
+      end
+
+      def extract(messages:, scope:)
+        result = @completion.complete(system: SYSTEM, user: transcript(messages), schema: SCHEMA)
+        facts(result).filter_map do |fact|
+          fact = fact.transform_keys(&:to_s)
+          content = fact["content"].to_s.strip
+          next if content.empty?
+          next if (fact["confidence"] || 1.0).to_f < @min_confidence
+
+          Engram::Record.new(
+            content: content,
+            scope: scope,
+            kind: (fact["kind"] || "semantic").to_sym,
+            importance: (fact["importance"] || 1.0).to_f,
+            embedding: @embedder.embed(content)
+          )
+        end
+      end
+
+      private
+
+      def facts(result)
+        return [] unless result.is_a?(Hash)
+
+        result["facts"] || result[:facts] || []
+      end
+
+      def transcript(messages)
+        Array(messages).map { |m| line(m) }.join("\n")
+      end
+
+      def line(message)
+        if message.is_a?(Hash)
+          role = message[:role] || message["role"] || "user"
+          "#{role}: #{message[:content] || message["content"]}"
+        else
+          "user: #{message}"
+        end
+      end
+    end
+  end
+end

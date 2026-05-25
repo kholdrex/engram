@@ -1,0 +1,24 @@
+# frozen_string_literal: true
+
+class CreateEngramMemories < ActiveRecord::Migration[<%= migration_version %>]
+  def change
+    enable_extension "vector" unless extension_enabled?("vector")
+
+    create_table :engram_memories do |t|
+      t.string :scope, null: false
+      t.text :content, null: false
+      t.string :kind, null: false, default: "semantic"
+      t.float :importance, null: false, default: 1.0
+      t.jsonb :metadata, null: false, default: {}
+      t.vector :embedding, limit: <%= dimensions %>
+      t.datetime :last_accessed_at
+
+      t.timestamps
+    end
+
+    add_index :engram_memories, :scope
+
+    # For larger datasets, add an approximate index (requires data present first):
+    # add_index :engram_memories, :embedding, using: :hnsw, opclass: :vector_cosine_ops
+  end
+end

@@ -1,0 +1,19 @@
+# frozen_string_literal: true
+
+require "bundler/gem_tasks"
+require "rspec/core/rake_task"
+
+RSpec::Core::RakeTask.new(:spec)
+
+begin
+  require "standard/rake"
+rescue LoadError
+  # standard not installed; lint task unavailable
+end
+
+desc "Run the recall quality eval (precision@k)"
+task :eval do
+  ruby "eval/run.rb"
+end
+
+task default: %i[spec]

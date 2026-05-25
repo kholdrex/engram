@@ -1,0 +1,13 @@
+/.bundle/
+/vendor/bundle/
+/pkg/
+/tmp/
+/coverage/
+/doc/
+*.gem
+Gemfile.lock
+.DS_Store
+.byebug_history
+
+# Local design notes — kept out of the repo
+/docs/adr/

@@ -1,0 +1,12 @@
+# frozen_string_literal: true
+
+Engram.configure do |config|
+  # Persist memories in your own Postgres via pgvector + neighbor.
+  config.store = Engram::Adapters::PgvectorStore.new
+
+  # Generate embeddings via RubyLLM. Configure RubyLLM separately with your provider keys.
+  config.embedder = Engram::Adapters::RubyLLMEmbedder.new
+
+  # How many memories to recall by default.
+  config.default_limit = 5
+end
