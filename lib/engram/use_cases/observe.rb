@@ -63,7 +63,11 @@ module Engram
         return unless record
 
         record = record.with(embedding: @embedder.embed(record.content)) if record.content != original_content
-        action == :add ? @store.add(record) : @store.update(id: id, record: record)
+        if action == :add
+          @store.add(record)
+        else
+          @store.update(id: id, record: record)
+        end
       end
     end
   end

@@ -6,7 +6,7 @@ module Engram
   # denylist patterns before storage.
   class PersistencePolicy
     SECRET_PATTERNS = [
-      /\b(?:api[_ -]?key|token|secret|password)\b\s*(?:is|=|:)\s+(?=\S*[0-9_\-])\S{8,}/i,
+      /\b(?:api[_ -]?key|token|secret|password)\b\s*(?:is|=|:)\s+(?=\S*[0-9_-])\S{8,}/i,
       /\bsk-[A-Za-z0-9_-]{6,}\b/,
       /\b(?:ghp|github_pat)_[A-Za-z0-9_]{10,}\b/
     ].freeze
