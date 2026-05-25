@@ -1,7 +1,5 @@
 # frozen_string_literal: true
 
-require "set"
-
 module Engram
   module Adapters
     # In-process ProcessedTurns. The zero-config default; guards against double-processing
