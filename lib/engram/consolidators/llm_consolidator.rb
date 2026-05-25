@@ -21,20 +21,25 @@ module Engram
         Return one decision per candidate, referencing it by its index.
       PROMPT
 
+      # Shaped for OpenAI strict structured outputs: every object sets
+      # additionalProperties: false and lists all of its properties in `required`. target_id
+      # is nullable because add/noop decisions reference no existing memory.
       SCHEMA = {
         type: "object",
+        additionalProperties: false,
         properties: {
           decisions: {
             type: "array",
             items: {
               type: "object",
+              additionalProperties: false,
               properties: {
                 index: {type: "integer"},
                 action: {type: "string", enum: %w[add update forget noop]},
-                target_id: {type: %w[integer string null]},
+                target_id: {type: %w[integer null]},
                 reason: {type: "string"}
               },
-              required: %w[index action]
+              required: %w[index action target_id reason]
             }
           }
         },
