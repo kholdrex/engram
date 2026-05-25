@@ -185,16 +185,19 @@ For honest recall numbers, run the eval with a real embedder instead of the test
 gem install ruby_llm
 ENGRAM_EMBEDDER=ruby_llm OPENAI_API_KEY=... ruby eval/run.rb
 
-# Optional: score real extraction/consolidation decisions instead of the scripted smoke path.
+# Optional: exercise the live completion adapter for manual inspection.
+# Exact extraction/consolidation quality scoring is not implemented yet.
 ENGRAM_COMPLETION=ruby_llm ENGRAM_COMPLETION_MODEL=gpt-4o-mini OPENAI_API_KEY=... ruby eval/run.rb
 ```
 
 The default eval path is deterministic and network-free, so it is safe to run in CI as a
-smoke test. It reports recall@k over labelled relevant memories, positive-query
-precision@k, near-distractor retrieval rate, hallucinated-recall rate for negative
-queries, extraction structured-output parsing cases, consolidation decision cases, and a
-heuristic duplicate-add baseline. Treat the default NullEmbedder recall numbers as a
-mechanics check, not as a semantic retrieval benchmark.
+smoke test. It reports recall@k over labelled relevant memories, a labelled
+precision proxy@k, near-distractor retrieval rate, contradiction-pair full recall,
+extraction structured-output parsing cases, consolidation decision cases, and a heuristic
+duplicate-add baseline. Negative queries are printed for inspection, but top-k recall
+currently has no similarity threshold, so the harness does not report a hallucination
+rate. Treat the default NullEmbedder recall numbers as a mechanics check, not as a
+semantic retrieval benchmark.
 
 ## Roadmap
 

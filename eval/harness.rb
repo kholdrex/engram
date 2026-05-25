@@ -2,8 +2,8 @@
 
 # Quality harness for recall, extraction, and consolidation. The default path is
 # network-free and CI-safe. For meaningful recall numbers, configure a semantic
-# embedder with ENGRAM_EMBEDDER=ruby_llm. To score real extraction/consolidation
-# model quality, set ENGRAM_COMPLETION=ruby_llm.
+# embedder with ENGRAM_EMBEDDER=ruby_llm. ENGRAM_COMPLETION=ruby_llm is a
+# manual adapter smoke path, not an exact quality score.
 
 $LOAD_PATH.unshift File.expand_path("../lib", __dir__)
 require "engram"
@@ -23,11 +23,11 @@ module Engram
       run_recall(embedder)
 
       puts
-      puts "Extraction (scripted structured-output smoke):"
+      puts "Extraction (#{completion_mode} structured-output smoke):"
       extraction_ok = run_extraction(embedder)
 
       puts
-      puts "Consolidation (scripted judge smoke):"
+      puts "Consolidation (#{completion_mode} judge smoke):"
       consolidation_ok = run_consolidation(embedder)
 
       puts
@@ -87,13 +87,16 @@ module Engram
 
       positives = rows.reject { |row| row[:negative] }
       negatives = rows.select { |row| row[:negative] }
+      contradictions = rows.select { |row| row[:contradiction] }
       hit_count = positives.count { |row| row[:hit] }
       relevant_total = positives.sum { |row| row[:relevant_total] }
       relevant_retrieved = positives.sum { |row| row[:relevant_retrieved] }
       positive_retrieved = positives.sum { |row| row[:results].size }
       distractor_retrieved = positives.sum { |row| row[:distractor_retrieved] }
       distractor_total = positives.sum { |row| row[:distractor_total] }
-      hallucinated = negatives.count { |row| row[:results].any? }
+      contradiction_hits = contradictions.count do |row|
+        row[:relevant_retrieved] == row[:relevant_total]
+      end
 
       metrics = {
         hit_count: hit_count,
@@ -103,7 +106,8 @@ module Engram
         positive_retrieved: positive_retrieved,
         distractor_retrieved: distractor_retrieved,
         distractor_total: distractor_total,
-        hallucinated: hallucinated,
+        contradiction_hits: contradiction_hits,
+        contradiction_count: contradictions.size,
         negative_count: negatives.size
       }
 
@@ -123,7 +127,7 @@ module Engram
         positives.size
       )
       puts format(
-        "  precision@%d: %.1f%% (%d/%d positive-query results)",
+        "  labelled precision proxy@%d: %.1f%% (%d/%d positive-query results)",
         k,
         percent(relevant_retrieved, positive_retrieved),
         relevant_retrieved,
@@ -136,11 +140,12 @@ module Engram
         distractor_total
       )
       puts format(
-        "  hallucinated-recall rate: %.1f%% (%d/%d negative queries)",
-        percent(hallucinated, negatives.size),
-        hallucinated,
-        negatives.size
+        "  contradiction pair full-recall rate: %.1f%% (%d/%d labelled pairs)",
+        percent(contradiction_hits, contradictions.size),
+        contradiction_hits,
+        contradictions.size
       )
+      puts format("  negative queries inspected: %d (top-k retrieval always returns rows)", negatives.size)
       metrics
     end
 
@@ -160,6 +165,7 @@ module Engram
         relevant_total: relevant.size,
         distractor_retrieved: distractor_retrieved,
         distractor_total: distractors.size,
+        contradiction: fixture[:contradiction] || false,
         label: hit ? "PASS" : "FAIL"
       }
     end
@@ -170,7 +176,7 @@ module Engram
         completion = completion_for(fixture[:response])
         extractor = Engram::Extractors::LLMExtractor.new(completion: completion, embedder: embedder)
         actual = extractor.extract(messages: fixture[:messages], scope: SCOPE).map(&:content)
-        ok = actual == fixture[:expected]
+        ok = live_completion? || actual == fixture[:expected]
         passed += 1 if ok
         puts "  #{ok ? "PASS" : "FAIL"}  #{fixture[:name]}"
         puts "        expected: #{fixture[:expected].join(" | ")}"
@@ -188,7 +194,7 @@ module Engram
         completion = completion_for(fixture[:response])
         consolidator = Engram::Consolidators::LLMConsolidator.new(store: store, completion: completion)
         decision = consolidator.reconcile_all(candidates: [record(fixture[:candidate], embedder)], scope: SCOPE).first
-        ok = decision.action == fixture[:expected_action]
+        ok = live_completion? || decision.action == fixture[:expected_action]
         passed += 1 if ok
         puts "  #{ok ? "PASS" : "FAIL"}  #{fixture[:name]} -> #{decision.action}"
       end
@@ -226,12 +232,20 @@ module Engram
     end
 
     def completion_for(scripted_response)
-      if ENV["ENGRAM_COMPLETION"] == "ruby_llm"
+      if live_completion?
         configure_ruby_llm!
         Engram::Adapters::RubyLLMCompletion.new(model: ENV["ENGRAM_COMPLETION_MODEL"])
       else
         Engram::Adapters::FakeCompletion.new(responses: [scripted_response])
       end
+    end
+
+    def live_completion?
+      ENV["ENGRAM_COMPLETION"] == "ruby_llm"
+    end
+
+    def completion_mode
+      live_completion? ? "live-adapter" : "scripted"
     end
 
     def percent(numerator, denominator)

@@ -36,7 +36,8 @@ RSpec.describe "eval harness" do
       :positive_retrieved,
       :distractor_retrieved,
       :distractor_total,
-      :hallucinated
+      :contradiction_hits,
+      :contradiction_count
     )
   end
 
