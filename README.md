@@ -17,6 +17,37 @@ is on the Pro plan, is vegetarian, or already tried clearing the cache. The usua
 fall short: stuffing whole transcripts into the prompt is expensive and noisy, and plain
 RAG retrieves documents, not personal facts. Engram is the memory layer in between.
 
+## Before and after
+
+Without a memory layer, every session starts blank:
+
+```text
+Day 1
+  User:  I'm on the Pro plan, and please keep answers short.
+  Agent: Got it.
+
+Day 5 (new session — the model has forgotten)
+  User:  Why am I being rate limited?
+  Agent: Which plan are you on? Can you share more about your setup?
+```
+
+With engram, the facts from day 1 are recalled and added to the prompt before the model answers:
+
+```ruby
+# Day 1: engram extracts and stores
+#   "User is on the Pro plan", "User prefers short answers"
+current_user.memory.observe(conversation)
+
+# Day 5: engram recalls the relevant facts, then asks the model
+chat = Engram.with_memory(RubyLLM.chat, memory: current_user.memory)
+chat.ask("Why am I being rate limited?")
+```
+
+```text
+  Agent: You're on the Pro plan, which has a per-minute request cap, and you're
+         hitting it. (Kept short, as you prefer.)
+```
+
 ## Installation
 
 ```ruby
