@@ -5,6 +5,7 @@ require_relative "engram/configuration"
 require_relative "engram/math"
 require_relative "engram/record"
 require_relative "engram/decision"
+require_relative "engram/turn_digest"
 
 # Ports (contracts)
 require_relative "engram/ports/memory_store"
@@ -12,16 +13,19 @@ require_relative "engram/ports/embedder"
 require_relative "engram/ports/completion"
 require_relative "engram/ports/extractor"
 require_relative "engram/ports/consolidator"
+require_relative "engram/ports/processed_turns"
 
 # Use cases
 require_relative "engram/use_cases/recall"
 require_relative "engram/use_cases/inject"
 require_relative "engram/use_cases/observe"
+require_relative "engram/use_cases/forget"
 
 # Built-in adapters (pure Ruby, no external deps)
 require_relative "engram/adapters/in_memory_store"
 require_relative "engram/adapters/null_embedder"
 require_relative "engram/adapters/fake_completion"
+require_relative "engram/adapters/in_memory_processed_turns"
 
 # Optional adapters. These reference external libraries (neighbor, ruby_llm) only at
 # call time, so requiring the files here is safe even if those gems are absent.

@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "rails/railtie"
+require_relative "rails/cache_processed_turns"
 
 module Engram
   # Wires engram into Rails: the `has_memory` macro on ActiveRecord models and the

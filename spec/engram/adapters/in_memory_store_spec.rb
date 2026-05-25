@@ -55,4 +55,11 @@ RSpec.describe Engram::Adapters::InMemoryStore do
     expect { store.update(id: 999, record: rec("x", scope: "u:1", embedding: [1.0, 0.0])) }
       .to raise_error(Engram::Error)
   end
+
+  it "touches last_accessed_at by id" do
+    r = store.add(rec("x", scope: "u:1", embedding: [1.0, 0.0]))
+    expect(r.last_accessed_at).to be_nil
+    store.touch(id: r.id)
+    expect(store.all(scope: "u:1").first.last_accessed_at).not_to be_nil
+  end
 end

@@ -119,6 +119,35 @@ memory.observe([
 
 In Rails, run it off the request path: `current_user.memory.observe_later(messages)`.
 
+## Tuning and maintenance (v0.3)
+
+Observation is idempotent per turn: observing the same messages twice does nothing the
+second time, so retries do not create duplicate memories or repeat LLM calls. In Rails,
+use a persistent store so this also holds across job retries and processes:
+
+```ruby
+Engram.configure do |c|
+  c.processed_turns = Engram::Rails::CacheProcessedTurns.new
+end
+```
+
+Recall is plain similarity search by default. You can blend in importance and recency:
+
+```ruby
+Engram.configure do |c|
+  c.importance_weight = 0.3
+  c.recency_weight = 0.2
+  c.touch_on_recall = true   # update last_accessed_at when a memory is recalled
+end
+```
+
+Prune memories you no longer need:
+
+```ruby
+# Forget memories untouched for 90 days, but keep anything important
+current_user.memory.forget_stale(older_than: 90 * 24 * 60 * 60, min_importance: 0.7)
+```
+
 ## How it works
 
 A loop around your LLM calls. Before a call: recall relevant memories and inject them.
@@ -149,17 +178,24 @@ DATABASE_URL=postgres://postgres:postgres@localhost:5432/engram_test \
   bundle exec rspec --tag integration
 ```
 
-For honest recall numbers, run the eval with a real embedder instead of the test stub:
+For honest recall numbers, run the eval with a real embedder instead of the test stub.
+`ruby_llm` is not a dependency, so install it separately first:
 
 ```bash
-ENGRAM_EMBEDDER=ruby_llm ruby eval/run.rb   # needs the ruby_llm gem + an API key
+gem install ruby_llm
+ENGRAM_EMBEDDER=ruby_llm OPENAI_API_KEY=... ruby eval/run.rb
 ```
+
+On the bundled fixture set, recall@3 is 100% (4/4) with OpenAI's text-embedding-3-small,
+and the consolidation dedup checks pass. The fixture is deliberately small. Treat it as a
+retrieval smoke test, not a benchmark.
 
 ## Roadmap
 
 - v0.1 (done): recall + inject foundation, adapters, Rails + RubyLLM integration.
 - v0.2 (done): extract and consolidate (ADD / UPDATE / FORGET), background jobs.
-- later: reranking and decay, memory types per policy, additional storage backends, eval benchmarks.
+- v0.3 (done): idempotent observation, importance/recency recall, forgetting and decay.
+- later: memory types per policy, additional storage backends, larger eval benchmarks.
 
 ## License
 

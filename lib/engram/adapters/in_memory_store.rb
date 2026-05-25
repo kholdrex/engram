@@ -43,6 +43,12 @@ module Engram
         @records.delete(id)
       end
 
+      def touch(id:, at: Time.now)
+        record = @records[id]
+        record.last_accessed_at = at if record
+        record
+      end
+
       def clear
         @records.clear
         @sequence = 0

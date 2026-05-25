@@ -6,7 +6,8 @@ module Engram
   # initializer typically swaps in PgvectorStore + RubyLLMEmbedder + RubyLLMCompletion.
   class Configuration
     attr_accessor :store, :embedder, :completion, :default_limit,
-      :consolidator, :extraction_min_confidence
+      :consolidator, :extraction_min_confidence, :processed_turns,
+      :importance_weight, :recency_weight, :recency_halflife, :touch_on_recall
 
     def initialize
       @store = Adapters::InMemoryStore.new
@@ -15,6 +16,13 @@ module Engram
       @default_limit = 5
       @consolidator = :heuristic # :heuristic (deterministic) or :llm (LLM-as-judge)
       @extraction_min_confidence = 0.5
+      @processed_turns = Adapters::InMemoryProcessedTurns.new # idempotency for observe
+
+      # Recall ranking. With both weights at 0.0, recall is plain similarity search.
+      @importance_weight = 0.0
+      @recency_weight = 0.0
+      @recency_halflife = UseCases::Recall::DEFAULT_HALFLIFE
+      @touch_on_recall = false
     end
   end
 end

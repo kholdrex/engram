@@ -27,7 +27,14 @@ module Engram
 
     # Return the most relevant memories for a query.
     def recall(query, limit: Engram.config.default_limit)
-      UseCases::Recall.new(store: @store, embedder: @embedder).call(query, scope: scope, limit: limit)
+      UseCases::Recall.new(
+        store: @store,
+        embedder: @embedder,
+        importance_weight: Engram.config.importance_weight,
+        recency_weight: Engram.config.recency_weight,
+        recency_halflife: Engram.config.recency_halflife,
+        touch: Engram.config.touch_on_recall
+      ).call(query, scope: scope, limit: limit)
     end
 
     # Recall, then inject into a prompt string.
@@ -41,14 +48,19 @@ module Engram
     # Returns the Array<Decision> applied. Requires a configured Completion.
     def observe(messages, completion: Engram.config.completion)
       if completion.nil?
-        raise Engram::Error, "observe requires a Completion — set Engram.config.completion"
+        raise Engram::Error, "observe requires a Completion. Set Engram.config.completion."
       end
 
       UseCases::Observe.new(
         store: @store,
         extractor: build_extractor(completion),
-        consolidator: build_consolidator(completion)
-      ).call(messages: messages, scope: scope)
+        consolidator: build_consolidator(completion),
+        processed_turns: Engram.config.processed_turns
+      ).call(
+        messages: messages,
+        scope: scope,
+        idempotency_key: TurnDigest.digest(scope: scope, messages: messages)
+      )
     end
 
     # Enqueue observation as a background job (Rails only).
@@ -62,6 +74,13 @@ module Engram
 
     def all
       @store.all(scope: scope)
+    end
+
+    # Prune stale memories. `older_than` is a duration in seconds; `min_importance` keeps
+    # memories at or above that importance even when old. Returns the forgotten records.
+    def forget_stale(older_than:, min_importance: Float::INFINITY)
+      UseCases::Forget.new(store: @store)
+        .call(scope: scope, older_than: older_than, min_importance: min_importance)
     end
 
     private

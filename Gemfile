@@ -17,3 +17,6 @@ group :integration do
   gem "pg", "~> 1.5"
   gem "neighbor", "~> 0.5"
 end
+
+# NOTE: ruby_llm is intentionally NOT a dependency here. The optional RubyLLM adapters and
+# the real-embedder eval reference it only at call time; install it separately if you use them.

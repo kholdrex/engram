@@ -48,4 +48,22 @@ RSpec.describe Engram::UseCases::Observe do
     expect(decisions).to eq([])
     expect(store.all(scope: "u:1")).to be_empty
   end
+
+  it "skips a turn already processed under the same idempotency key" do
+    completion = Engram::Adapters::FakeCompletion.new(responses: [extraction("User likes tea")])
+    consolidator = Engram::Consolidators::HeuristicConsolidator.new(store: store)
+    processed = Engram::Adapters::InMemoryProcessedTurns.new
+    observe = described_class.new(
+      store: store, extractor: extractor_for(completion), consolidator: consolidator,
+      processed_turns: processed
+    )
+
+    first = observe.call(messages: ["I like tea"], scope: "u:1", idempotency_key: "turn-1")
+    second = observe.call(messages: ["I like tea"], scope: "u:1", idempotency_key: "turn-1")
+
+    expect(first.map(&:action)).to eq([:add])
+    expect(second).to eq([])
+    expect(store.all(scope: "u:1").size).to eq(1)
+    expect(completion.calls.size).to eq(1) # extraction did not run again
+  end
 end

@@ -7,9 +7,9 @@ module Engram
   # to target UPDATE/FORGET. `scope` namespaces memories to an owner (e.g. "user:42").
   # `kind` is a memory type (semantic / episodic / preference).
   class Record
-    attr_accessor :id
+    attr_accessor :id, :last_accessed_at
     attr_reader :content, :embedding, :scope, :kind, :importance, :metadata,
-      :created_at, :last_accessed_at
+      :created_at
 
     def initialize(content:, scope:, id: nil, embedding: nil, kind: :semantic,
       importance: 1.0, metadata: {}, created_at: nil, last_accessed_at: nil)

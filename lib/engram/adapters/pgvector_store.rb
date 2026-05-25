@@ -54,6 +54,10 @@ module Engram
         model.where(id: id).delete_all
       end
 
+      def touch(id:, at: Time.now)
+        model.where(id: id).update_all(last_accessed_at: at)
+      end
+
       private
 
       def model

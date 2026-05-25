@@ -40,4 +40,22 @@ RSpec.describe Engram::Memory do
   it "raises on observe without a completion" do
     expect { memory.observe(["hi"], completion: nil) }.to raise_error(Engram::Error)
   end
+
+  it "is idempotent for a repeated turn" do
+    completion = Engram::Adapters::FakeCompletion.new(responses: [
+      {"facts" => [{"content" => "User likes tea", "confidence" => 0.9}]}
+    ])
+    memory.observe(["I like tea"], completion: completion)
+    memory.observe(["I like tea"], completion: completion)
+
+    expect(memory.all.map(&:content)).to eq(["User likes tea"])
+    expect(completion.calls.size).to eq(1)
+  end
+
+  it "forgets stale memories via the facade" do
+    store.add(Engram::Record.new(content: "old", scope: "user:1",
+      embedding: embedder.embed("old"), created_at: Time.now - (40 * 24 * 60 * 60)))
+    memory.forget_stale(older_than: 30 * 24 * 60 * 60)
+    expect(memory.all).to be_empty
+  end
 end

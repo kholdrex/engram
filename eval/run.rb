@@ -14,7 +14,17 @@ require_relative "fixtures"
 # Use a real semantic embedder for honest numbers (requires the ruby_llm gem + API key):
 #   ENGRAM_EMBEDDER=ruby_llm ENGRAM_EMBED_MODEL=text-embedding-3-small ruby eval/run.rb
 if ENV["ENGRAM_EMBEDDER"] == "ruby_llm"
-  require "ruby_llm"
+  begin
+    require "ruby_llm"
+  rescue LoadError
+    abort "ruby_llm is not installed (it is not a dependency of engram). " \
+      "Run `gem install ruby_llm`, then: ENGRAM_EMBEDDER=ruby_llm ruby eval/run.rb"
+  end
+  RubyLLM.configure do |config|
+    config.openai_api_key = ENV["OPENAI_API_KEY"] if ENV["OPENAI_API_KEY"]
+    config.anthropic_api_key = ENV["ANTHROPIC_API_KEY"] if ENV["ANTHROPIC_API_KEY"]
+    config.gemini_api_key = ENV["GEMINI_API_KEY"] if ENV["GEMINI_API_KEY"]
+  end
   Engram.configure do |c|
     c.embedder = Engram::Adapters::RubyLLMEmbedder.new(
       model: ENV.fetch("ENGRAM_EMBED_MODEL", "text-embedding-3-small")

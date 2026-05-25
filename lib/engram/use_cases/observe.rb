@@ -5,24 +5,42 @@ module Engram
     # Orchestrates a single observed turn: extract candidate facts, consolidate them
     # against existing memory, and apply the resulting decisions to the store.
     # Pure and synchronous — async execution is a Rails concern (see ObserveJob).
+    #
+    # When a ProcessedTurns store and an idempotency_key are provided, a turn that was
+    # already processed is skipped (no extraction, no duplicate memories).
     class Observe
-      def initialize(store:, extractor:, consolidator:)
+      def initialize(store:, extractor:, consolidator:, processed_turns: nil)
         @store = store
         @extractor = extractor
         @consolidator = consolidator
+        @processed_turns = processed_turns
       end
 
-      # Returns the Array<Decision> that were applied.
-      def call(messages:, scope:)
+      # Returns the Array<Decision> that were applied (empty if skipped or nothing found).
+      def call(messages:, scope:, idempotency_key: nil)
+        return [] if already_processed?(idempotency_key)
+
         candidates = @extractor.extract(messages: messages, scope: scope)
-        return [] if candidates.empty?
+        if candidates.empty?
+          mark_processed(idempotency_key)
+          return []
+        end
 
         decisions = @consolidator.reconcile_all(candidates: candidates, scope: scope)
         decisions.each { |decision| apply(decision) }
+        mark_processed(idempotency_key)
         decisions
       end
 
       private
+
+      def already_processed?(key)
+        !!(key && @processed_turns&.seen?(key))
+      end
+
+      def mark_processed(key)
+        @processed_turns.record(key) if key && @processed_turns
+      end
 
       def apply(decision)
         case decision.action

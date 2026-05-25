@@ -31,6 +31,11 @@ module Engram
       def delete(id:)
         raise NotImplementedError, "#{self.class} must implement #delete"
       end
+
+      # Update the last-accessed timestamp of a memory. Used by recency-aware recall.
+      def touch(id:, at: Time.now)
+        raise NotImplementedError, "#{self.class} must implement #touch"
+      end
     end
   end
 end

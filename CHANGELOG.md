@@ -5,6 +5,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.3.0] — idempotency, smarter recall, forgetting
+
+### Added
+- Idempotent observation: `ProcessedTurns` port, `InMemoryProcessedTurns`,
+  `Rails::CacheProcessedTurns`, and a stable `TurnDigest`. A repeated turn is skipped.
+- Recall ranking options: `importance_weight`, `recency_weight`, and `recency_halflife`,
+  blended on top of vector similarity (defaults keep plain similarity search).
+- `touch_on_recall` and `MemoryStore#touch` to update `last_accessed_at` on recall.
+- `UseCases::Forget` and `Memory#forget_stale` to prune memories by age and importance.
+
 ## [0.2.0] — extract → consolidate
 
 ### Added
