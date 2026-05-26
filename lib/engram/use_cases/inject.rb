@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "cgi"
+
 module Engram
   module UseCases
     # Render recalled memories into a prompt as a clearly delimited block.
@@ -14,8 +16,17 @@ module Engram
       def call(prompt:, memories:)
         return prompt if memories.nil? || memories.empty?
 
-        block = memories.map { |m| "- #{m.content}" }.join("\n")
-        "#{prompt}\n\n#{@header}:\n#{block}"
+        block = memories.map { |memory| render_memory(memory) }.join("\n")
+        "#{prompt}\n\n#{@header}:\n<engram-memories>\n#{block}\n</engram-memories>"
+      end
+
+      private
+
+      def render_memory(memory)
+        kind = CGI.escapeHTML((memory.kind || :fact).to_s)
+        content = CGI.escapeHTML(memory.content.to_s)
+
+        %(<engram-memory kind="#{kind}">#{content}</engram-memory>)
       end
     end
   end

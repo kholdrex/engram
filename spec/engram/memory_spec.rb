@@ -12,13 +12,22 @@ RSpec.describe Engram::Memory do
     expect(results.first.content).to eq("tariff plan is Pro")
   end
 
+  it "recalls only requested memory kinds" do
+    memory.add("likes short answers", kind: :preference)
+    memory.add("tariff plan is Pro", kind: :fact)
+
+    results = memory.recall("answers", limit: 5, kinds: [:preference])
+
+    expect(results.map(&:content)).to eq(["likes short answers"])
+  end
+
   it "embeds content on add" do
     record = memory.add("hello")
     expect(record.embedding).to eq(embedder.embed("hello"))
   end
 
   it "applies the default persistence policy on add" do
-    result = memory.add("User API key is sk-test-secret")
+    result = memory.add("User API key is ***")
 
     expect(result).to be_nil
     expect(memory.all).to be_empty
@@ -39,7 +48,17 @@ RSpec.describe Engram::Memory do
   it "injects recalled memories into a prompt" do
     memory.add("likes short answers")
     out = memory.inject_into("Reply to the user.", query: "likes short answers")
-    expect(out).to include("- likes short answers")
+    expect(out).to include('<engram-memory kind="fact">likes short answers</engram-memory>')
+  end
+
+  it "injects only requested memory kinds" do
+    memory.add("likes short answers", kind: :preference)
+    memory.add("tariff plan is Pro", kind: :fact)
+
+    out = memory.inject_into("Reply to the user.", query: "answers", limit: 5, kinds: [:preference])
+
+    expect(out).to include("likes short answers")
+    expect(out).not_to include("tariff plan is Pro")
   end
 
   it "isolates memories by scope" do

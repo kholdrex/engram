@@ -54,8 +54,8 @@ if deps_available
 
     before { Engram::MemoryRecord.delete_all }
 
-    def rec(content, embedding:, scope: "u:1")
-      Engram::Record.new(content: content, scope: scope, embedding: embedding)
+    def rec(content, embedding:, scope: "u:1", kind: :fact)
+      Engram::Record.new(content: content, scope: scope, embedding: embedding, kind: kind)
     end
 
     it "persists a record and assigns an id" do
@@ -71,6 +71,30 @@ if deps_available
 
       results = store.search(embedding: [1.0, 0.0, 0.0], scope: "u:1", limit: 5)
       expect(results.map(&:content)).to eq(["near", "far"])
+    end
+
+    it "filters nearest neighbours by memory kind" do
+      store.add(rec("prefers concise answers", embedding: [1.0, 0.0, 0.0], kind: :preference))
+      store.add(rec("billing tier is Pro", embedding: [1.0, 0.0, 0.0], kind: :fact))
+
+      results = store.search(embedding: [1.0, 0.0, 0.0], scope: "u:1", limit: 5, kinds: [:preference])
+
+      expect(results.map(&:content)).to eq(["prefers concise answers"])
+    end
+
+    it "includes legacy semantic rows when filtering for facts" do
+      Engram::MemoryRecord.create!(
+        content: "billing tier is Pro",
+        scope: "u:1",
+        kind: "semantic",
+        importance: 1.0,
+        metadata: {},
+        embedding: [1.0, 0.0, 0.0]
+      )
+
+      results = store.search(embedding: [1.0, 0.0, 0.0], scope: "u:1", limit: 5, kinds: [:fact])
+
+      expect(results.map(&:content)).to eq(["billing tier is Pro"])
     end
 
     it "updates an existing record by id" do

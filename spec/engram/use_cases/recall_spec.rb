@@ -6,8 +6,8 @@ RSpec.describe Engram::UseCases::Recall do
   let(:store) { Engram::Adapters::InMemoryStore.new }
   let(:embedder) { Engram::Adapters::NullEmbedder.new }
 
-  def seed(content, scope: "u:1")
-    store.add(Engram::Record.new(content: content, scope: scope, embedding: embedder.embed(content)))
+  def seed(content, scope: "u:1", kind: :fact)
+    store.add(Engram::Record.new(content: content, scope: scope, embedding: embedder.embed(content), kind: kind))
   end
 
   it "returns the exact match first for a known query" do
@@ -27,6 +27,15 @@ RSpec.describe Engram::UseCases::Recall do
     expect(recall.call("secret", scope: "u:1", limit: 5)).to be_empty
   end
 
+  it "recalls only requested memory kinds" do
+    seed("prefers concise answers", kind: :preference)
+    seed("billing tier is Pro", kind: :fact)
+
+    results = recall.call("answers", scope: "u:1", limit: 5, kinds: [:preference])
+
+    expect(results.map(&:content)).to eq(["prefers concise answers"])
+  end
+
   describe "ranking" do
     let(:fixed_embedder) do
       Class.new do
@@ -40,9 +49,19 @@ RSpec.describe Engram::UseCases::Recall do
       end.new
     end
 
-    def store_record(content, embedding:, importance: 1.0, created_at: Time.now)
+    def store_record(content, embedding:, importance: 1.0, created_at: Time.now, kind: :fact)
       store.add(Engram::Record.new(content: content, scope: "u:1", embedding: embedding,
-        importance: importance, created_at: created_at))
+        importance: importance, created_at: created_at, kind: kind))
+    end
+
+    it "filters before applying the recall limit" do
+      store_record("near fact", embedding: [1.0, 0.0], kind: :fact)
+      store_record("near preference", embedding: [0.9, 0.1], kind: :preference)
+
+      results = described_class.new(store: store, embedder: fixed_embedder)
+        .call("q", scope: "u:1", limit: 1, kinds: [:preference])
+
+      expect(results.map(&:content)).to eq(["near preference"])
     end
 
     it "orders by pure similarity when weights are zero" do
