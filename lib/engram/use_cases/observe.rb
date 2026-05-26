@@ -9,11 +9,12 @@ module Engram
     # When a ProcessedTurns store and an idempotency_key are provided, a turn that was
     # already processed is skipped (no extraction, no duplicate memories).
     class Observe
-      def initialize(store:, extractor:, consolidator:, processed_turns: nil)
+      def initialize(store:, extractor:, consolidator:, processed_turns: nil, embedder: Engram.config.embedder)
         @store = store
         @extractor = extractor
         @consolidator = consolidator
         @processed_turns = processed_turns
+        @embedder = embedder
       end
 
       # Returns the Array<Decision> that were applied (empty if skipped or nothing found).
@@ -27,9 +28,9 @@ module Engram
         end
 
         decisions = @consolidator.reconcile_all(candidates: candidates, scope: scope)
-        decisions.each { |decision| apply(decision) }
+        applied_decisions = decisions.filter_map { |decision| apply(decision) }
         mark_processed(idempotency_key)
-        decisions
+        applied_decisions
       end
 
       private
@@ -45,14 +46,20 @@ module Engram
       def apply(decision)
         case decision.action
         when :add
-          @store.add(decision.candidate)
+          decision if persistence.add(decision.candidate)
         when :update
-          @store.update(id: decision.target_id, record: decision.candidate) if decision.target_id
+          if decision.target_id && persistence.update(id: decision.target_id, record: decision.candidate)
+            decision
+          end
         when :forget
-          @store.delete(id: decision.target_id) if decision.target_id
+          decision if decision.target_id && @store.delete(id: decision.target_id)
         when :noop
           nil
         end
+      end
+
+      def persistence
+        @persistence ||= Persistence.new(store: @store, embedder: @embedder)
       end
     end
   end

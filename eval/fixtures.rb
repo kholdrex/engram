@@ -154,7 +154,7 @@ module Engram
           facts: [
             {
               content: "User works at Acme",
-              kind: "semantic",
+              kind: "fact",
               importance: 0.5,
               confidence: 0.2
             }

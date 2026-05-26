@@ -7,7 +7,8 @@ module Engram
   class Configuration
     attr_accessor :store, :embedder, :completion, :default_limit,
       :consolidator, :extraction_min_confidence, :processed_turns,
-      :importance_weight, :recency_weight, :recency_halflife, :touch_on_recall
+      :importance_weight, :recency_weight, :recency_halflife, :touch_on_recall,
+      :persistence_policy, :before_persist
 
     def initialize
       @store = Adapters::InMemoryStore.new
@@ -17,6 +18,8 @@ module Engram
       @consolidator = :heuristic # :heuristic (deterministic) or :llm (LLM-as-judge)
       @extraction_min_confidence = 0.5
       @processed_turns = Adapters::InMemoryProcessedTurns.new # idempotency for observe
+      @persistence_policy = PersistencePolicy.new
+      @before_persist = nil
 
       # Recall ranking. With both weights at 0.0, recall is plain similarity search.
       @importance_weight = 0.0

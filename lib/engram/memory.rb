@@ -12,8 +12,9 @@ module Engram
       @embedder = embedder
     end
 
-    # Persist a fact. (In v0.2 this is mostly done for you via extract/consolidate.)
-    def add(content, kind: :semantic, importance: 1.0, metadata: {})
+    # Persist a memory record of the given kind. Returns nil when the configured
+    # persistence policy rejects the record.
+    def add(content, kind: :fact, importance: 1.0, metadata: {})
       record = Record.new(
         content: content,
         scope: scope,
@@ -22,7 +23,7 @@ module Engram
         importance: importance,
         metadata: metadata
       )
-      @store.add(record)
+      persist(record)
     end
 
     # Return the most relevant memories for a query.
@@ -55,7 +56,8 @@ module Engram
         store: @store,
         extractor: build_extractor(completion),
         consolidator: build_consolidator(completion),
-        processed_turns: Engram.config.processed_turns
+        processed_turns: Engram.config.processed_turns,
+        embedder: @embedder
       ).call(
         messages: messages,
         scope: scope,
@@ -84,6 +86,10 @@ module Engram
     end
 
     private
+
+    def persist(record)
+      Persistence.new(store: @store, embedder: @embedder).add(record)
+    end
 
     def build_extractor(completion)
       Extractors::LLMExtractor.new(

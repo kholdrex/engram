@@ -78,7 +78,7 @@ module Engram
           content: row.content,
           scope: row.scope,
           embedding: row.embedding,
-          kind: (row.kind || :semantic).to_sym,
+          kind: row.kind || :fact,
           importance: row.importance || 1.0,
           metadata: row.metadata || {},
           created_at: row.created_at,

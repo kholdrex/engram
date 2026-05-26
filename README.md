@@ -119,6 +119,33 @@ memory.observe([
 
 In Rails, run it off the request path: `current_user.memory.observe_later(messages)`.
 
+## Memory kinds and persistence policy
+
+Every memory has a normalized `kind`:
+
+- `fact` — stable attributes or state
+- `preference` — user preferences
+- `instruction` — durable instructions about how to work with the user
+- `episodic` — durable history worth preserving
+
+The legacy `semantic` kind is still accepted and normalized to `fact` for compatibility.
+Before storage, Engram applies a default persistence policy that rejects obvious secrets
+(API keys, tokens, passwords) and transient task-progress updates. If a memory is rejected,
+`Memory#add` returns `nil`. You can add a custom redaction or policy hook; when redaction
+changes content, Engram recomputes the embedding before storage:
+
+```ruby
+Engram.configure do |config|
+  config.before_persist = lambda do |record|
+    record.with(content: record.content.gsub(/billing@example\.test/, "[REDACTED]"))
+  end
+
+  config.persistence_policy = Engram::PersistencePolicy.new(
+    denylist_patterns: [/internal-ticket-\d+/i]
+  )
+end
+```
+
 ## Tuning and maintenance (v0.3)
 
 Observation is idempotent per turn: observing the same messages twice does nothing the
@@ -204,7 +231,8 @@ semantic retrieval benchmark.
 - v0.1 (done): recall + inject foundation, adapters, Rails + RubyLLM integration.
 - v0.2 (done): extract and consolidate (ADD / UPDATE / FORGET), background jobs.
 - v0.3 (done): idempotent observation, importance/recency recall, forgetting and decay.
-- later: memory types per policy, additional storage backends, larger eval benchmarks.
+- v0.4 (in progress): memory kinds and persistence policy.
+- later: typed recall filters, safer injection, additional storage backends, larger eval benchmarks.
 
 ## License
 
