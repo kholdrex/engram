@@ -49,15 +49,33 @@ RSpec.describe Engram::UseCases::Observe do
     expect(store.all(scope: "u:1")).to be_empty
   end
 
-  it "applies the persistence policy before storing observed memories" do
+  it "omits decisions rejected by the persistence policy" do
     completion = Engram::Adapters::FakeCompletion.new(responses: [extraction("User API key is sk-test-secret")])
     consolidator = Engram::Consolidators::HeuristicConsolidator.new(store: store)
 
     decisions = described_class.new(store: store, extractor: extractor_for(completion), consolidator: consolidator)
       .call(messages: ["my API key is sk-test-secret"], scope: "u:1")
 
-    expect(decisions.map(&:action)).to eq([:add])
+    expect(decisions).to eq([])
     expect(store.all(scope: "u:1")).to be_empty
+  end
+
+  it "applies the configured before_persist hook before storing observed memories" do
+    Engram.config.before_persist = lambda do |record|
+      record.with(content: record.content.gsub("billing@example.test", "[REDACTED]"))
+    end
+    completion = Engram::Adapters::FakeCompletion.new(
+      responses: [extraction("User billing email is billing@example.test")]
+    )
+    consolidator = Engram::Consolidators::HeuristicConsolidator.new(store: store)
+
+    decisions = described_class.new(store: store, extractor: extractor_for(completion), consolidator: consolidator)
+      .call(messages: ["billing@example.test"], scope: "u:1")
+
+    expect(decisions.map(&:action)).to eq([:add])
+    expect(store.all(scope: "u:1").map(&:content)).to eq(["User billing email is [REDACTED]"])
+    expect(store.all(scope: "u:1").first.embedding)
+      .to eq(embedder.embed("User billing email is [REDACTED]"))
   end
 
   it "skips a turn already processed under the same idempotency key" do

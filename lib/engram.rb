@@ -8,6 +8,7 @@ require_relative "engram/record"
 require_relative "engram/decision"
 require_relative "engram/turn_digest"
 require_relative "engram/persistence_policy"
+require_relative "engram/persistence"
 
 # Ports (contracts)
 require_relative "engram/ports/memory_store"

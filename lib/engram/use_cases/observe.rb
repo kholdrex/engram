@@ -28,9 +28,9 @@ module Engram
         end
 
         decisions = @consolidator.reconcile_all(candidates: candidates, scope: scope)
-        decisions.each { |decision| apply(decision) }
+        applied_decisions = decisions.filter_map { |decision| apply(decision) }
         mark_processed(idempotency_key)
-        decisions
+        applied_decisions
       end
 
       private
@@ -46,28 +46,20 @@ module Engram
       def apply(decision)
         case decision.action
         when :add
-          persist(:add, decision.candidate)
+          decision if persistence.add(decision.candidate)
         when :update
-          persist(:update, decision.candidate, id: decision.target_id) if decision.target_id
+          if decision.target_id && persistence.update(id: decision.target_id, record: decision.candidate)
+            decision
+          end
         when :forget
-          @store.delete(id: decision.target_id) if decision.target_id
+          decision if decision.target_id && @store.delete(id: decision.target_id)
         when :noop
           nil
         end
       end
 
-      def persist(action, record, id: nil)
-        original_content = record.content
-        record = Engram.config.before_persist.call(record) if Engram.config.before_persist
-        record = Engram.config.persistence_policy.call(record) if record && Engram.config.persistence_policy
-        return unless record
-
-        record = record.with(embedding: @embedder.embed(record.content)) if record.content != original_content
-        if action == :add
-          @store.add(record)
-        else
-          @store.update(id: id, record: record)
-        end
+      def persistence
+        @persistence ||= Persistence.new(store: @store, embedder: @embedder)
       end
     end
   end

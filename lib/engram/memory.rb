@@ -12,7 +12,8 @@ module Engram
       @embedder = embedder
     end
 
-    # Persist a fact. (In v0.2 this is mostly done for you via extract/consolidate.)
+    # Persist a memory record of the given kind. Returns nil when the configured
+    # persistence policy rejects the record.
     def add(content, kind: :fact, importance: 1.0, metadata: {})
       record = Record.new(
         content: content,
@@ -87,11 +88,7 @@ module Engram
     private
 
     def persist(record)
-      original_content = record.content
-      record = Engram.config.before_persist.call(record) if Engram.config.before_persist
-      record = Engram.config.persistence_policy.call(record) if record && Engram.config.persistence_policy
-      record = record.with(embedding: @embedder.embed(record.content)) if record && record.content != original_content
-      @store.add(record) if record
+      Persistence.new(store: @store, embedder: @embedder).add(record)
     end
 
     def build_extractor(completion)
