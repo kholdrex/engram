@@ -5,6 +5,39 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- Canonical memory kinds: `fact`, `preference`, `instruction`, and `episodic`.
+- Typed recall filters via `kinds:` for `Memory#recall` and prompt injection.
+- Typed XML-like memory injection with escaped content and `kind` attributes.
+- Default `PersistencePolicy` that rejects obvious secrets/tokens/passwords and transient
+  task-progress memories before storage.
+- `before_persist` hook and caller-provided denylist redaction support.
+- Documentation for provider-agnostic model configuration, pgvector setup, production
+  readiness, and prompt-injection safety.
+
+### Changed
+- Legacy `semantic` memories are normalized to `fact` in Ruby and included by `kinds: [:fact]`
+  filters for compatibility.
+- `Memory#add` returns `nil` when the persistence policy rejects a memory.
+- Redacted or otherwise modified records have embeddings recomputed before storage.
+- Rails generator default memory kind is now `fact` instead of `semantic`.
+- README status, feature overview, Rails setup, development commands, and roadmap now reflect
+  the current pre-1.0 API surface.
+
+### Security
+- Memory persistence rejects common secret and credential patterns by default.
+- Documentation now calls out that recalled memories are untrusted user-derived context, not
+  system instructions or authorization facts.
+
+### Upgrade notes
+- Existing rows with `kind = "semantic"` continue to work: Engram treats them as `fact` at
+  read time for recall filters; existing rows are not rewritten. New generated migrations
+  default to `fact`.
+- If application code assumed `Memory#add` always returns a record, handle `nil` for rejected
+  memories.
+- If you change embedding providers/models, verify the generated pgvector column dimension
+  matches the embedding vector length.
+
 ## [0.3.0] - 2026-05-25 — idempotency, smarter recall, forgetting
 
 ### Added

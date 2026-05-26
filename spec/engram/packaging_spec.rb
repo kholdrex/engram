@@ -22,4 +22,14 @@ RSpec.describe "gem packaging" do
   it "declares no hard runtime dependencies" do
     expect(spec.runtime_dependencies).to be_empty
   end
+
+  it "declares useful gem metadata" do
+    expect(spec.metadata).to include(
+      "homepage_uri" => "https://github.com/kholdrex/engram",
+      "source_code_uri" => "https://github.com/kholdrex/engram/tree/main",
+      "changelog_uri" => "https://github.com/kholdrex/engram/blob/main/CHANGELOG.md",
+      "bug_tracker_uri" => "https://github.com/kholdrex/engram/issues",
+      "rubygems_mfa_required" => "true"
+    )
+  end
 end
