@@ -26,9 +26,12 @@ module Engram
         to_record(row)
       end
 
-      def search(embedding:, scope:, limit:)
-        model
-          .where(scope: scope)
+      def search(embedding:, scope:, limit:, kinds: nil)
+        query = model.where(scope: scope)
+        normalized_kinds = normalize_kinds(kinds)
+        query = query.where(kind: normalized_kinds) if normalized_kinds
+
+        query
           .nearest_neighbors(:embedding, embedding, distance: "cosine")
           .limit(limit)
           .map { |row| to_record(row) }
@@ -84,6 +87,26 @@ module Engram
           created_at: row.created_at,
           last_accessed_at: row.try(:last_accessed_at)
         )
+      end
+
+      def normalize_kinds(kinds)
+        return nil if kinds.nil?
+
+        values = Array(kinds)
+        return nil if values.empty?
+
+        values
+          .map { |kind| Engram::MemoryKind.normalize(kind) }
+          .flat_map { |kind| persisted_kind_values(kind) }
+          .uniq
+      end
+
+      def persisted_kind_values(kind)
+        # Include legacy rows persisted before canonical kind normalization.
+        legacy_aliases = Engram::MemoryKind::LEGACY_ALIASES
+          .select { |_, canonical| canonical == kind }
+          .keys
+        ([kind] + legacy_aliases).map(&:to_s)
       end
     end
   end

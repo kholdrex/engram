@@ -18,10 +18,12 @@ module Engram
         record
       end
 
-      def search(embedding:, scope:, limit:)
+      def search(embedding:, scope:, limit:, kinds: nil)
+        allowed_kinds = normalize_kinds(kinds)
+
         @records
           .values
-          .select { |r| r.scope == scope && r.embedding }
+          .select { |r| searchable?(r, scope, allowed_kinds) }
           .map { |r| [r, Engram::Math.cosine_similarity(embedding, r.embedding)] }
           .sort_by { |(_, score)| -score }
           .first(limit)
@@ -52,6 +54,21 @@ module Engram
       def clear
         @records.clear
         @sequence = 0
+      end
+
+      private
+
+      def searchable?(record, scope, allowed_kinds)
+        record.scope == scope && record.embedding && (allowed_kinds.nil? || allowed_kinds.include?(record.kind))
+      end
+
+      def normalize_kinds(kinds)
+        return nil if kinds.nil?
+
+        values = Array(kinds)
+        return nil if values.empty?
+
+        values.map { |kind| Engram::MemoryKind.normalize(kind) }
       end
     end
   end

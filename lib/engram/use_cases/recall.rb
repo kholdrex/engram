@@ -24,12 +24,12 @@ module Engram
       end
 
       # Returns Array<Record>, most relevant first.
-      def call(query, scope:, limit: Engram.config.default_limit)
+      def call(query, scope:, limit: Engram.config.default_limit, kinds: nil)
         raise ArgumentError, "query must be a non-empty string" if query.to_s.strip.empty?
 
         embedding = @embedder.embed(query)
         pool_limit = reranking? ? limit * @pool_factor : limit
-        pool = @store.search(embedding: embedding, scope: scope, limit: pool_limit)
+        pool = @store.search(embedding: embedding, scope: scope, limit: pool_limit, kinds: kinds)
 
         results = (reranking? ? rerank(pool, embedding) : pool).first(limit)
         touch(results) if @touch

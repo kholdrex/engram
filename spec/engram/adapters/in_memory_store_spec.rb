@@ -3,8 +3,8 @@
 RSpec.describe Engram::Adapters::InMemoryStore do
   subject(:store) { described_class.new }
 
-  def rec(content, scope:, embedding:)
-    Engram::Record.new(content: content, scope: scope, embedding: embedding)
+  def rec(content, scope:, embedding:, kind: :fact)
+    Engram::Record.new(content: content, scope: scope, embedding: embedding, kind: kind)
   end
 
   it "adds and returns the record" do
@@ -32,6 +32,31 @@ RSpec.describe Engram::Adapters::InMemoryStore do
   it "respects the limit" do
     5.times { |i| store.add(rec("c#{i}", scope: "u:1", embedding: [1.0, i.to_f])) }
     expect(store.search(embedding: [1.0, 0.0], scope: "u:1", limit: 2).size).to eq(2)
+  end
+
+  it "filters search results by canonical memory kind" do
+    store.add(rec("prefers concise answers", scope: "u:1", embedding: [1.0, 0.0], kind: :preference))
+    store.add(rec("billing tier is Pro", scope: "u:1", embedding: [1.0, 0.0], kind: :fact))
+
+    results = store.search(embedding: [1.0, 0.0], scope: "u:1", limit: 5, kinds: [:preference])
+
+    expect(results.map(&:content)).to eq(["prefers concise answers"])
+  end
+
+  it "normalizes legacy kind aliases when filtering search results" do
+    store.add(rec("billing tier is Pro", scope: "u:1", embedding: [1.0, 0.0], kind: :fact))
+
+    results = store.search(embedding: [1.0, 0.0], scope: "u:1", limit: 5, kinds: [:semantic])
+
+    expect(results.map(&:content)).to eq(["billing tier is Pro"])
+  end
+
+  it "treats an empty kind filter as no filter" do
+    store.add(rec("billing tier is Pro", scope: "u:1", embedding: [1.0, 0.0], kind: :fact))
+
+    results = store.search(embedding: [1.0, 0.0], scope: "u:1", limit: 5, kinds: [])
+
+    expect(results.map(&:content)).to eq(["billing tier is Pro"])
   end
 
   it "assigns an id on add" do

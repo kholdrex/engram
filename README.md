@@ -129,6 +129,29 @@ Every memory has a normalized `kind`:
 - `episodic` — durable history worth preserving
 
 The legacy `semantic` kind is still accepted and normalized to `fact` for compatibility.
+Recall can be narrowed to specific kinds when you only want preferences, instructions, or
+another subset:
+
+```ruby
+memory.recall("how should I answer?", kinds: [:preference, :instruction])
+memory.inject_into(prompt, query: "how should I answer?", kinds: [:preference, :instruction])
+```
+
+`kinds: []` is treated the same as omitting `kinds`, so callers that build filters
+programmatically do not accidentally suppress all recall results.
+
+Injected memories are rendered as typed XML-like elements with escaped content, which keeps
+memory text clearly delimited from the rest of the prompt:
+
+```xml
+<engram-memories>
+<engram-memory kind="preference">Prefers concise answers</engram-memory>
+</engram-memories>
+```
+
+For compatibility during migration, `kinds: [:fact]` also includes legacy rows persisted
+with the old `semantic` kind value.
+
 Before storage, Engram applies a default persistence policy that rejects obvious secrets
 (API keys, tokens, passwords) and transient task-progress updates. If a memory is rejected,
 `Memory#add` returns `nil`. You can add a custom redaction or policy hook; when redaction
@@ -231,8 +254,8 @@ semantic retrieval benchmark.
 - v0.1 (done): recall + inject foundation, adapters, Rails + RubyLLM integration.
 - v0.2 (done): extract and consolidate (ADD / UPDATE / FORGET), background jobs.
 - v0.3 (done): idempotent observation, importance/recency recall, forgetting and decay.
-- v0.4 (in progress): memory kinds and persistence policy.
-- later: typed recall filters, safer injection, additional storage backends, larger eval benchmarks.
+- v0.4 (in progress): memory kinds, persistence policy, typed recall filters, and safer injection.
+- later: additional storage backends and larger eval benchmarks.
 
 ## License
 

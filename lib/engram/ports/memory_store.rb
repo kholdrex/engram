@@ -11,8 +11,9 @@ module Engram
       end
 
       # Return up to `limit` Records in `scope` nearest to `embedding`,
-      # ordered most-relevant first.
-      def search(embedding:, scope:, limit:)
+      # ordered most-relevant first. When `kinds` is provided, only records with
+      # those canonical memory kinds are eligible.
+      def search(embedding:, scope:, limit:, kinds: nil)
         raise NotImplementedError, "#{self.class} must implement #search"
       end
 
