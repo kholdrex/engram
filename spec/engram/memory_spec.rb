@@ -27,7 +27,7 @@ RSpec.describe Engram::Memory do
   end
 
   it "applies the default persistence policy on add" do
-    result = memory.add("User API key is ***")
+    result = memory.add("User API key is fake-token-abcdef")
 
     expect(result).to be_nil
     expect(memory.all).to be_empty
