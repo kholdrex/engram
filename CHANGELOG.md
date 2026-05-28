@@ -5,6 +5,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-05-28
+
 ### Added
 - Canonical memory kinds: `fact`, `preference`, `instruction`, and `episodic`.
 - Typed recall filters via `kinds:` for `Memory#recall` and prompt injection.
