@@ -36,6 +36,10 @@ module Engram
 
       warn_if_null_embedder(embedder)
       exit(1) unless extraction_ok && consolidation_ok && heuristic_ok
+    rescue => error
+      raise unless ruby_llm_configuration_error?(error)
+
+      abort ruby_llm_configuration_message(error)
     end
 
     def configure_embedder
@@ -51,6 +55,8 @@ module Engram
     end
 
     def configure_ruby_llm!
+      ensure_utf8_external_encoding!
+
       unless defined?(RubyLLM)
         begin
           require "ruby_llm"
@@ -60,11 +66,34 @@ module Engram
         end
       end
 
-      RubyLLM.configure do |config|
-        config.openai_api_key = ENV["OPENAI_API_KEY"] if ENV["OPENAI_API_KEY"]
-        config.anthropic_api_key = ENV["ANTHROPIC_API_KEY"] if ENV["ANTHROPIC_API_KEY"]
-        config.gemini_api_key = ENV["GEMINI_API_KEY"] if ENV["GEMINI_API_KEY"]
-      end
+      load_ruby_llm_setup!
+    end
+
+    def ensure_utf8_external_encoding!
+      return if Encoding.default_external == Encoding::UTF_8
+
+      Encoding.default_external = Encoding::UTF_8
+    end
+
+    def load_ruby_llm_setup!
+      setup_path = ENV["ENGRAM_RUBY_LLM_SETUP"]
+      return if setup_path.nil? || setup_path.empty?
+
+      require File.expand_path(setup_path)
+    end
+
+    def ruby_llm_configuration_error?(error)
+      defined?(RubyLLM::ConfigurationError) && error.is_a?(RubyLLM::ConfigurationError)
+    end
+
+    def ruby_llm_configuration_message(error)
+      <<~MESSAGE
+        RubyLLM provider configuration is missing or invalid: #{error.message}
+
+        `rake eval:real` delegates provider setup to RubyLLM. Configure RubyLLM for your
+        chosen provider, or set ENGRAM_RUBY_LLM_SETUP=/path/to/setup.rb to load setup code
+        before the eval harness runs.
+      MESSAGE
     end
 
     def run_recall(embedder)

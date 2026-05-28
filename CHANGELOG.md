@@ -13,7 +13,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   task-progress memories before storage.
 - `before_persist` hook and caller-provided denylist redaction support.
 - Documentation for provider-agnostic model configuration, pgvector setup, production
-  readiness, and prompt-injection safety.
+  readiness, prompt-injection safety, and real-provider eval smoke testing.
+- `rake eval:real` for RubyLLM-backed eval smoke runs that keep provider configuration
+  delegated to RubyLLM.
 
 ### Changed
 - Legacy `semantic` memories are normalized to `fact` in Ruby and included by `kinds: [:fact]`
@@ -23,6 +25,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Rails generator default memory kind is now `fact` instead of `semantic`.
 - README status, feature overview, Rails setup, development commands, and roadmap now reflect
   the current pre-1.0 API surface.
+- Real-provider eval setup delegates provider-specific RubyLLM configuration to RubyLLM
+  instead of hardcoding credential environment variable names in Engram.
+- Real-provider eval forces UTF-8 external encoding before loading RubyLLM so smoke runs work
+  even when the shell locale defaults Ruby to US-ASCII.
+- RubyLLM provider configuration failures now show an eval-specific setup hint instead of a raw
+  provider stack trace.
 
 ### Security
 - Memory persistence rejects common secret and credential patterns by default.
