@@ -355,30 +355,44 @@ DATABASE_URL=postgres:///engram_test bundle exec rspec --tag integration
 That short `DATABASE_URL` assumes local Unix-socket/peer authentication. Use an explicit
 connection string when your database runs in Docker, CI, or under a different role.
 
-For honest recall numbers, run the eval with a real embedder instead of the test stub.
-`ruby_llm` is intentionally not a gem dependency, so install it outside Bundler first and
-run the eval runner directly:
+For honest recall numbers and live adapter smoke coverage, run the eval with real
+RubyLLM providers instead of the test stubs. `ruby_llm` is intentionally not a gem
+dependency, so install it outside Bundler first, configure RubyLLM for your provider, and
+use the explicit real-provider task:
 
 ```bash
 gem install ruby_llm
-ENGRAM_EMBEDDER=ruby_llm \
-ENGRAM_EMBED_MODEL=text-embedding-3-small \
-OPENAI_API_KEY=... \
-ruby eval/run.rb
+bundle exec rake eval:real
 
-# Optional: exercise the live completion adapter for manual inspection.
-# Exact extraction/consolidation quality scoring is not implemented yet.
-ENGRAM_COMPLETION=ruby_llm \
+# Optional model overrides; keep embedding dimensions aligned with your database schema.
+ENGRAM_EMBED_MODEL=text-embedding-3-small \
 ENGRAM_COMPLETION_MODEL=gpt-4o-mini \
-OPENAI_API_KEY=... \
-ruby eval/run.rb
+bundle exec rake eval:real
 ```
 
-OpenAI is shown only because those are the current default example models. Use the provider
-credentials and model names required by your RubyLLM configuration.
+If the eval needs standalone RubyLLM setup code, point `ENGRAM_RUBY_LLM_SETUP` at a Ruby
+file that configures RubyLLM for your provider before the harness runs. This is the
+recommended path for providers that need base URLs, local endpoints, or configuration beyond
+RubyLLM's built-in environment handling:
 
-The default eval path is deterministic and network-free, so it is safe to run in CI as a
-smoke test. It reports recall@k over labelled relevant memories, a labelled precision
+```bash
+ENGRAM_RUBY_LLM_SETUP=./ruby_llm_eval_setup.rb bundle exec rake eval:real
+```
+
+`eval:real` runs the same harness with `ENGRAM_EMBEDDER=ruby_llm` and
+`ENGRAM_COMPLETION=ruby_llm` under `Bundler.with_unbundled_env`, so the optional
+provider gem can live outside Engram's bundle. OpenAI's `text-embedding-3-small` is the
+default embedding example; if you choose another embedding model, keep the pgvector
+column dimension aligned with that model's vector length. OpenAI is shown only because
+those are the current default example models. Use the provider credentials, base URL, and
+model names required by your RubyLLM configuration. Engram only checks that the optional
+`ruby_llm` gem can be loaded; provider-specific validation still comes from RubyLLM, and
+`eval:real` adds an eval-specific setup hint when RubyLLM reports missing configuration.
+
+The default `bundle exec rake eval` path remains deterministic and network-free, so it is
+safe to run in CI as a smoke test.
+
+The harness reports recall@k over labelled relevant memories, a labelled precision
 proxy@k, near-distractor retrieval rate, contradiction-pair full recall, extraction
 structured-output parsing cases, consolidation decision cases, and a heuristic duplicate-add
 baseline. Negative queries are printed for inspection, but top-k recall currently has no
