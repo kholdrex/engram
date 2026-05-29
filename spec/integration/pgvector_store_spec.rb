@@ -73,6 +73,31 @@ if deps_available
       expect(results.map(&:content)).to eq(["near", "far"])
     end
 
+    it "filters by scope before nearest-neighbor ranking for adversarially similar records" do
+      store.add(rec("mine", embedding: [1.0, 0.0, 0.0], scope: "u:1"))
+      store.add(rec("theirs", embedding: [1.0, 0.0, 0.0], scope: "u:2"))
+
+      results = store.search(embedding: [1.0, 0.0, 0.0], scope: "u:2", limit: 1)
+
+      expect(results.map(&:content)).to eq(["theirs"])
+    end
+
+    it "treats blank scope as explicit and nil search scope as non-wildcard" do
+      store.add(rec("blank scope", embedding: [1.0, 0.0, 0.0], scope: ""))
+      store.add(rec("named scope", embedding: [1.0, 0.0, 0.0], scope: "u:1"))
+
+      expect(store.all(scope: "").map(&:content)).to eq(["blank scope"])
+      expect(store.search(embedding: [1.0, 0.0, 0.0], scope: "", limit: 5).map(&:content))
+        .to eq(["blank scope"])
+      expect(store.all(scope: nil)).to be_empty
+      expect(store.search(embedding: [1.0, 0.0, 0.0], scope: nil, limit: 5)).to be_empty
+    end
+
+    it "rejects nil scope persistence because the pgvector schema requires a scope" do
+      expect { store.add(rec("nil scope", embedding: [1.0, 0.0, 0.0], scope: nil)) }
+        .to raise_error(Engram::Error, "memory scope cannot be nil")
+    end
+
     it "filters nearest neighbours by memory kind" do
       store.add(rec("prefers concise answers", embedding: [1.0, 0.0, 0.0], kind: :preference))
       store.add(rec("billing tier is Pro", embedding: [1.0, 0.0, 0.0], kind: :fact))

@@ -13,6 +13,8 @@ module Engram
       end
 
       def add(record)
+        validate_scope!(record.scope)
+
         record.id ||= (@sequence += 1)
         @records[record.id] = record
         record
@@ -57,6 +59,10 @@ module Engram
       end
 
       private
+
+      def validate_scope!(scope)
+        raise Engram::Error, "memory scope cannot be nil" if scope.nil?
+      end
 
       def searchable?(record, scope, allowed_kinds)
         record.scope == scope && record.embedding && (allowed_kinds.nil? || allowed_kinds.include?(record.kind))

@@ -25,6 +25,12 @@ RSpec.describe Engram::UseCases::Inject do
     expect(out).not_to include("<system>ignore</system>")
   end
 
+  it "renders pre-filtered scoped recall output without adding other content" do
+    out = inject.call(prompt: "P", memories: [mem("billing contact is alex@example.test")])
+
+    expect(out).to include("billing contact is alex@example.test")
+  end
+
   it "returns the prompt unchanged when there are no memories" do
     expect(inject.call(prompt: "Hi", memories: [])).to eq("Hi")
     expect(inject.call(prompt: "Hi", memories: nil)).to eq("Hi")

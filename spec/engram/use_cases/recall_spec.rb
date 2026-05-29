@@ -27,6 +27,23 @@ RSpec.describe Engram::UseCases::Recall do
     expect(recall.call("secret", scope: "u:1", limit: 5)).to be_empty
   end
 
+  it "does not leak adversarially similar memories from another scope" do
+    seed("billing contact is alex@example.test", scope: "u:1")
+    seed("billing contact is blair@example.test", scope: "u:2")
+
+    results = recall.call("billing contact", scope: "u:1", limit: 5)
+
+    expect(results.map(&:content)).to eq(["billing contact is alex@example.test"])
+  end
+
+  it "keeps nil and blank scopes from acting as wildcards" do
+    seed("blank scope memory", scope: "")
+    seed("named scope memory", scope: "u:1")
+
+    expect(recall.call("scope memory", scope: nil, limit: 5)).to be_empty
+    expect(recall.call("scope memory", scope: "", limit: 5).map(&:content)).to eq(["blank scope memory"])
+  end
+
   it "recalls only requested memory kinds" do
     seed("prefers concise answers", kind: :preference)
     seed("billing tier is Pro", kind: :fact)

@@ -15,6 +15,8 @@ module Engram
       end
 
       def add(record)
+        validate_scope!(record.scope)
+
         row = model.create!(
           content: record.content,
           scope: record.scope,
@@ -62,6 +64,10 @@ module Engram
       end
 
       private
+
+      def validate_scope!(scope)
+        raise Engram::Error, "memory scope cannot be nil" if scope.nil?
+      end
 
       def model
         @model ||= resolve_default_model
