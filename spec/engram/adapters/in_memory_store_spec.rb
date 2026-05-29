@@ -21,6 +21,26 @@ RSpec.describe Engram::Adapters::InMemoryStore do
     expect(results.map(&:content)).to eq(["mine"])
   end
 
+  it "filters by scope before similarity for adversarially similar records" do
+    store.add(rec("mine", scope: "u:1", embedding: [1.0, 0.0]))
+    store.add(rec("theirs", scope: "u:2", embedding: [1.0, 0.0]))
+
+    expect(store.search(embedding: [1.0, 0.0], scope: "u:2", limit: 1).map(&:content))
+      .to eq(["theirs"])
+  end
+
+  it "rejects nil scope persistence and treats blank scope as explicit" do
+    store.add(rec("blank scope", scope: "", embedding: [1.0, 0.0]))
+    store.add(rec("named scope", scope: "u:1", embedding: [1.0, 0.0]))
+
+    expect { store.add(rec("nil scope", scope: nil, embedding: [1.0, 0.0])) }
+      .to raise_error(Engram::Error, "memory scope cannot be nil")
+    expect(store.all(scope: nil)).to be_empty
+    expect(store.all(scope: "").map(&:content)).to eq(["blank scope"])
+    expect(store.search(embedding: [1.0, 0.0], scope: nil, limit: 5)).to be_empty
+    expect(store.search(embedding: [1.0, 0.0], scope: "", limit: 5).map(&:content)).to eq(["blank scope"])
+  end
+
   it "orders by cosine similarity, nearest first" do
     store.add(rec("far", scope: "u:1", embedding: [0.0, 1.0]))
     store.add(rec("near", scope: "u:1", embedding: [1.0, 0.0]))

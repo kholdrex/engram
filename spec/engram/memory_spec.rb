@@ -67,6 +67,31 @@ RSpec.describe Engram::Memory do
     expect(other.all).to be_empty
   end
 
+  it "keeps similar recalled and injected memories isolated to the facade scope" do
+    memory.add("billing contact is alex@example.test")
+    described_class.new(scope: "user:2", store: store, embedder: embedder)
+      .add("billing contact is blair@example.test")
+
+    results = memory.recall("billing contact", limit: 5)
+    out = memory.inject_into("Reply to the user.", query: "billing contact", limit: 5)
+
+    expect(results.map(&:content)).to eq(["billing contact is alex@example.test"])
+    expect(out).to include("billing contact is alex@example.test")
+    expect(out).not_to include("billing contact is blair@example.test")
+  end
+
+  it "rejects nil scope persistence and treats blank scope as isolated" do
+    nil_scoped = described_class.new(scope: nil, store: store, embedder: embedder)
+    blank_scoped = described_class.new(scope: "", store: store, embedder: embedder)
+
+    blank_scoped.add("blank scope memory")
+
+    expect { nil_scoped.add("nil scope memory") }.to raise_error(Engram::Error, "memory scope cannot be nil")
+    expect(nil_scoped.all).to be_empty
+    expect(blank_scoped.all.map(&:content)).to eq(["blank scope memory"])
+    expect(memory.all).to be_empty
+  end
+
   it "observes a turn and stores derived memories" do
     completion = Engram::Adapters::FakeCompletion.new(responses: [
       {"facts" => [{"content" => "User likes tea", "confidence" => 0.9}]}
