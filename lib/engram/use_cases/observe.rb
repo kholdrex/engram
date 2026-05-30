@@ -19,18 +19,35 @@ module Engram
 
       # Returns the Array<Decision> that were applied (empty if skipped or nothing found).
       def call(messages:, scope:, idempotency_key: nil)
-        return [] if already_processed?(idempotency_key)
+        payload = Engram::Instrumentation.payload(
+          scope: scope,
+          store: @store,
+          message_count: messages.size,
+          idempotency_key_present: !idempotency_key.nil?
+        )
+        Engram::Instrumentation.instrument("observe", payload) do
+          if already_processed?(idempotency_key)
+            payload[:skipped] = true
+            payload[:candidate_count] = 0
+            payload[:decision_count] = 0
+            next []
+          end
 
-        candidates = @extractor.extract(messages: messages, scope: scope)
-        if candidates.empty?
+          candidates = extract(messages: messages, scope: scope)
+          payload[:candidate_count] = candidates.size
+          if candidates.empty?
+            mark_processed(idempotency_key)
+            payload[:decision_count] = 0
+            next []
+          end
+
+          decisions = consolidate(candidates: candidates, scope: scope)
+          applied_decisions = decisions.filter_map { |decision| apply(decision) }
+          payload[:decision_count] = applied_decisions.size
+          payload[:decision_actions] = applied_decisions.map { |decision| decision.action.to_s }
           mark_processed(idempotency_key)
-          return []
+          applied_decisions
         end
-
-        decisions = @consolidator.reconcile_all(candidates: candidates, scope: scope)
-        applied_decisions = decisions.filter_map { |decision| apply(decision) }
-        mark_processed(idempotency_key)
-        applied_decisions
       end
 
       private
@@ -41,6 +58,25 @@ module Engram
 
       def mark_processed(key)
         @processed_turns.record(key) if key && @processed_turns
+      end
+
+      def extract(messages:, scope:)
+        payload = Engram::Instrumentation.payload(scope: scope, store: @store, message_count: messages.size)
+        Engram::Instrumentation.instrument("extract", payload) do
+          candidates = @extractor.extract(messages: messages, scope: scope)
+          payload[:candidate_count] = candidates.size
+          candidates
+        end
+      end
+
+      def consolidate(candidates:, scope:)
+        payload = Engram::Instrumentation.payload(scope: scope, store: @store, candidate_count: candidates.size)
+        Engram::Instrumentation.instrument("consolidate", payload) do
+          decisions = @consolidator.reconcile_all(candidates: candidates, scope: scope)
+          payload[:decision_count] = decisions.size
+          payload[:decision_actions] = decisions.map { |decision| decision.action.to_s }
+          decisions
+        end
       end
 
       def apply(decision)

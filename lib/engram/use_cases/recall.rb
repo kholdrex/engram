@@ -27,13 +27,24 @@ module Engram
       def call(query, scope:, limit: Engram.config.default_limit, kinds: nil)
         raise ArgumentError, "query must be a non-empty string" if query.to_s.strip.empty?
 
-        embedding = @embedder.embed(query)
-        pool_limit = reranking? ? limit * @pool_factor : limit
-        pool = @store.search(embedding: embedding, scope: scope, limit: pool_limit, kinds: kinds)
+        payload = Engram::Instrumentation.payload(
+          scope: scope,
+          store: @store,
+          limit: limit,
+          kinds: Array(kinds).map(&:to_s),
+          reranking: reranking?
+        )
+        Engram::Instrumentation.instrument("recall", payload) do
+          embedding = @embedder.embed(query)
+          pool_limit = reranking? ? limit * @pool_factor : limit
+          pool = @store.search(embedding: embedding, scope: scope, limit: pool_limit, kinds: kinds)
 
-        results = (reranking? ? rerank(pool, embedding) : pool).first(limit)
-        touch(results) if @touch
-        results
+          results = (reranking? ? rerank(pool, embedding) : pool).first(limit)
+          touch(results) if @touch
+          payload[:result_count] = results.size
+          payload[:candidate_count] = pool.size
+          results
+        end
       end
 
       private

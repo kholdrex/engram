@@ -311,6 +311,46 @@ Prune memories you no longer need:
 current_user.memory.forget_stale(older_than: 90 * 24 * 60 * 60, min_importance: 0.7)
 ```
 
+## Observability
+
+When ActiveSupport is loaded, Engram emits `ActiveSupport::Notifications` events for the
+main memory pipeline:
+
+- `add.engram`
+- `recall.engram`
+- `inject.engram`
+- `observe.engram`
+- `extract.engram`
+- `consolidate.engram`
+- `observe_later.engram`
+
+Payloads intentionally avoid query text, message text, and memory content. They include
+operational metadata such as duration, counts, limits, kinds, decision actions, and the
+store adapter. Scope identifiers are omitted by default; opt in only when the value is
+safe to log in your application:
+
+```ruby
+Engram.configure do |config|
+  config.instrumentation_scope_identifier = ->(scope) { scope.to_s }
+end
+```
+
+```ruby
+ActiveSupport::Notifications.subscribe(/\.engram\z/) do |name, _started, _finished, _id, payload|
+  Rails.logger.info(
+    event: name,
+    duration_ms: payload[:duration_ms],
+    store_adapter: payload[:store_adapter],
+    scope: payload[:scope_identifier],
+    result_count: payload[:result_count],
+    decision_count: payload[:decision_count]
+  )
+end
+```
+
+Avoid adding memory content or raw prompts to subscriber logs; recalled content is
+user-derived and should be treated as sensitive application data.
+
 ## Production checklist
 
 - Install Postgres + pgvector and enable `CREATE EXTENSION vector` in the application database.
