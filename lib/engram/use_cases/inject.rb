@@ -14,10 +14,13 @@ module Engram
 
       # Returns a new prompt string. If there are no memories, the prompt is unchanged.
       def call(prompt:, memories:)
-        return prompt if memories.nil? || memories.empty?
+        payload = {memory_count: memories&.size.to_i}
+        Engram::Instrumentation.instrument("inject", payload) do
+          next prompt if memories.nil? || memories.empty?
 
-        block = memories.map { |memory| render_memory(memory) }.join("\n")
-        "#{prompt}\n\n#{@header}:\n<engram-memories>\n#{block}\n</engram-memories>"
+          block = memories.map { |memory| render_memory(memory) }.join("\n")
+          "#{prompt}\n\n#{@header}:\n<engram-memories>\n#{block}\n</engram-memories>"
+        end
       end
 
       private

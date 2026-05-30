@@ -15,15 +15,17 @@ module Engram
     # Persist a memory record of the given kind. Returns nil when the configured
     # persistence policy rejects the record.
     def add(content, kind: :fact, importance: 1.0, metadata: {})
-      record = Record.new(
-        content: content,
-        scope: scope,
-        embedding: @embedder.embed(content),
-        kind: kind,
-        importance: importance,
-        metadata: metadata
-      )
-      persist(record)
+      Engram::Instrumentation.instrument("add", Engram::Instrumentation.payload(scope: scope, store: @store, kind: kind)) do
+        record = Record.new(
+          content: content,
+          scope: scope,
+          embedding: @embedder.embed(content),
+          kind: kind,
+          importance: importance,
+          metadata: metadata
+        )
+        persist(record)
+      end
     end
 
     # Return the most relevant memories for a query.
@@ -71,7 +73,12 @@ module Engram
         raise Engram::Error, "observe_later needs ActiveJob (Rails). Use #observe outside Rails."
       end
 
-      Engram::ObserveJob.perform_later(scope, messages)
+      Engram::Instrumentation.instrument(
+        "observe_later",
+        Engram::Instrumentation.payload(scope: scope, store: @store, message_count: messages.size)
+      ) do
+        Engram::ObserveJob.perform_later(scope, messages)
+      end
     end
 
     def all

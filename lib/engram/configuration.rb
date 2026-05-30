@@ -8,7 +8,7 @@ module Engram
     attr_accessor :store, :embedder, :completion, :default_limit,
       :consolidator, :extraction_min_confidence, :processed_turns,
       :importance_weight, :recency_weight, :recency_halflife, :touch_on_recall,
-      :persistence_policy, :before_persist
+      :persistence_policy, :before_persist, :instrumentation_scope_identifier
 
     def initialize
       @store = Adapters::InMemoryStore.new
@@ -20,6 +20,7 @@ module Engram
       @processed_turns = Adapters::InMemoryProcessedTurns.new # idempotency for observe
       @persistence_policy = PersistencePolicy.new
       @before_persist = nil
+      @instrumentation_scope_identifier = nil
 
       # Recall ranking. With both weights at 0.0, recall is plain similarity search.
       @importance_weight = 0.0
