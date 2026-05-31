@@ -29,6 +29,15 @@ RSpec.describe Engram::Adapters::InMemoryStore do
       .to eq(["theirs"])
   end
 
+  it "treats scope prefixes as distinct owners" do
+    store.add(rec("short scope", scope: "user:4", embedding: [1.0, 0.0]))
+    store.add(rec("long scope", scope: "user:42", embedding: [1.0, 0.0]))
+
+    expect(store.all(scope: "user:4").map(&:content)).to eq(["short scope"])
+    expect(store.search(embedding: [1.0, 0.0], scope: "user:42", limit: 5).map(&:content))
+      .to eq(["long scope"])
+  end
+
   it "rejects nil scope persistence and treats blank scope as explicit" do
     store.add(rec("blank scope", scope: "", embedding: [1.0, 0.0]))
     store.add(rec("named scope", scope: "u:1", embedding: [1.0, 0.0]))
