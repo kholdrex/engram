@@ -309,6 +309,8 @@ Operational safety notes:
 - Use `kinds:` filters when a workflow only needs preferences/instructions or only factual context.
 - Store durable user facts, not secrets, credentials, request logs, or transient task progress.
 - Treat application authorization and data access as separate from memory recall.
+- Review [`SECURITY.md`](SECURITY.md) before using recalled memories in workflows with tools,
+  authorization decisions, or regulated data.
 
 For compatibility during migration, `kinds: [:fact]` also includes legacy rows persisted
 with the old `semantic` kind value.

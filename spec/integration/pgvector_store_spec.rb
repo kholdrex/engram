@@ -82,6 +82,15 @@ if deps_available
       expect(results.map(&:content)).to eq(["theirs"])
     end
 
+    it "treats scope prefixes as distinct owners" do
+      store.add(rec("short scope", embedding: [1.0, 0.0, 0.0], scope: "user:4"))
+      store.add(rec("long scope", embedding: [1.0, 0.0, 0.0], scope: "user:42"))
+
+      expect(store.all(scope: "user:4").map(&:content)).to eq(["short scope"])
+      expect(store.search(embedding: [1.0, 0.0, 0.0], scope: "user:42", limit: 5).map(&:content))
+        .to eq(["long scope"])
+    end
+
     it "treats blank scope as explicit and nil search scope as non-wildcard" do
       store.add(rec("blank scope", embedding: [1.0, 0.0, 0.0], scope: ""))
       store.add(rec("named scope", embedding: [1.0, 0.0, 0.0], scope: "u:1"))
