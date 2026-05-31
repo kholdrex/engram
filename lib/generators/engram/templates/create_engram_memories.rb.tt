@@ -18,7 +18,14 @@ class CreateEngramMemories < ActiveRecord::Migration[<%= migration_version %>]
 
     add_index :engram_memories, :scope
 
-    # For larger datasets, add an approximate index (requires data present first):
-    # add_index :engram_memories, :embedding, using: :hnsw, opclass: :vector_cosine_ops
+    # For larger datasets, choose one approximate vector index after backfilling data.
+    # HNSW is a strong default for read-heavy recall workloads with frequent inserts.
+    # IVFFlat can be smaller/faster to build, but should be created after enough representative data exists.
+    #
+    # HNSW:
+    #   add_index :engram_memories, :embedding, using: :hnsw, opclass: :vector_cosine_ops
+    # IVFFlat:
+    #   add_index :engram_memories, :embedding, using: :ivfflat, opclass: :vector_cosine_ops
+    # See the Engram README for production index guidance.
   end
 end
