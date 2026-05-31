@@ -17,6 +17,10 @@ module Engram
       class_option :dimensions, type: :numeric, default: DEFAULT_DIMENSIONS,
         desc: "Embedding dimensions (match your embedding model)"
 
+      def validate_dimensions
+        validate_dimensions!
+      end
+
       def create_migration_file
         migration_template "create_engram_memories.rb.tt",
           "db/migrate/create_engram_memories.rb"
@@ -38,6 +42,12 @@ module Engram
 
       def dimensions
         options[:dimensions]
+      end
+
+      def validate_dimensions!
+        return if dimensions.is_a?(Integer) && dimensions.positive?
+
+        raise ArgumentError, "dimensions must be a positive integer that matches your embedding model"
       end
 
       def migration_version

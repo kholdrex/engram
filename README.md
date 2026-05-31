@@ -151,7 +151,32 @@ gem "ruby_llm"
 
 If you change embedding models, keep the database column dimension in sync with the
 embedding vector length. A model that returns 768-dimensional vectors needs a 768-dimensional
-`vector` column; a 1536-dimensional migration will not be compatible with it.
+`vector` column; a 1536-dimensional migration will not be compatible with it. The install
+generator rejects non-positive or non-integer `--dimensions` values so an invalid vector
+size does not land in a migration.
+
+For production recall performance, add one approximate vector index after the table has
+representative data. HNSW is the recommended default for read-heavy applications because it
+usually gives strong recall and query speed while still supporting inserts. IVFFlat can use
+less memory and build faster, but it needs enough existing rows to train useful lists and may
+need tuning as the dataset grows. Both index styles should use `vector_cosine_ops` to match
+Engram's cosine-distance recall ordering.
+
+Example migration follow-up:
+
+```ruby
+class AddEngramMemoryEmbeddingIndex < ActiveRecord::Migration[8.0]
+  disable_ddl_transaction!
+
+  def change
+    add_index :engram_memories,
+      :embedding,
+      using: :hnsw,
+      opclass: :vector_cosine_ops,
+      algorithm: :concurrently
+  end
+end
+```
 
 ## Model/provider configuration
 
