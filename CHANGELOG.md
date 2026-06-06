@@ -5,7 +5,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-## [0.4.0] - 2026-05-28
+## [0.4.0] - 2026-06-06
 
 ### Added
 - Canonical memory kinds: `fact`, `preference`, `instruction`, and `episodic`.
@@ -14,8 +14,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Default `PersistencePolicy` that rejects obvious secrets/tokens/passwords and transient
   task-progress memories before storage.
 - `before_persist` hook and caller-provided denylist redaction support.
+- Optional `ActiveSupport::Notifications` instrumentation around the observe/recall/inject
+  pipeline (`*.engram` events) with a configurable `instrumentation_scope_identifier` for
+  privacy-safe scope tagging. Stays a no-op when ActiveSupport is not loaded, so the core
+  remains dependency-free.
 - Documentation for provider-agnostic model configuration, pgvector setup, production
   readiness, prompt-injection safety, and real-provider eval smoke testing.
+- `SECURITY.md` threat model covering prompt-injection boundaries, secret handling, and
+  the untrusted-input posture of recalled memories.
 - `rake eval:real` for RubyLLM-backed eval smoke runs that keep provider configuration
   delegated to RubyLLM.
 
@@ -25,6 +31,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `Memory#add` returns `nil` when the persistence policy rejects a memory.
 - Redacted or otherwise modified records have embeddings recomputed before storage.
 - Rails generator default memory kind is now `fact` instead of `semantic`.
+- Install generator and `create_engram_memories` template harden pgvector setup: clearer
+  extension installation guidance, safer defaults, and explicit dimension handling.
+- `InMemoryStore` and `PgvectorStore` enforce scope isolation defensively so recall, update,
+  and delete operations cannot cross scopes even when callers pass mismatched ids.
 - README status, feature overview, Rails setup, development commands, and roadmap now reflect
   the current pre-1.0 API surface.
 - Real-provider eval setup delegates provider-specific RubyLLM configuration to RubyLLM
@@ -38,6 +48,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Memory persistence rejects common secret and credential patterns by default.
 - Documentation now calls out that recalled memories are untrusted user-derived context, not
   system instructions or authorization facts.
+- Published a memory security threat model in `SECURITY.md` covering the boundaries Engram
+  enforces and the ones the host application must enforce.
+- Store-level scope isolation guarantees prevent cross-scope memory leakage on misuse.
 
 ### Upgrade notes
 - Existing rows with `kind = "semantic"` continue to work: Engram treats them as `fact` at
