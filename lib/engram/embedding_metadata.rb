@@ -54,7 +54,7 @@ module Engram
           "metadata key #{RESERVED_KEY.inspect} is reserved for Engram embedding metadata"
       end
 
-      reserved = reserved_values.reduce({}) { |merged, reserved| merged.merge(stringify_keys(reserved)) }
+      reserved = reserved_values.reduce({}) { |merged, reserved_value| merged.merge(stringify_keys(reserved_value)) }
       unexpected_reserved_keys = reserved.keys - [EMBEDDING_KEY]
       unless unexpected_reserved_keys.empty?
         raise Engram::Error,
