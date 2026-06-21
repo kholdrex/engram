@@ -112,7 +112,7 @@ module Engram
       query_metadata = stringify_keys(query_metadata || {})
       return if query_metadata.empty?
 
-      conflicting_key = %w[fingerprint adapter provider model dimensions].find do |key|
+      conflicting_key = %w[adapter provider model dimensions fingerprint].find do |key|
         stored.key?(key) && query_metadata.key?(key) && stored[key].to_s != query_metadata[key].to_s
       end
       return unless conflicting_key

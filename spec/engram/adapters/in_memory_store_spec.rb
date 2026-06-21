@@ -81,7 +81,7 @@ RSpec.describe Engram::Adapters::InMemoryStore do
         scope: "u:1",
         limit: 5
       )
-    end.to raise_error(Engram::Error, /embedding metadata mismatch/)
+    end.to raise_error(Engram::Error, /embedding metadata mismatch.*model/)
   end
 
   it "raises when query and stored vector lengths differ" do

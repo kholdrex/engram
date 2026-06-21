@@ -7,7 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 - Embedding provenance metadata is stored with new memories so applications can detect model
-  and dimension drift before recall compares incompatible vectors.
+  and dimension drift during recall result validation.
 
 ### Changed
 - Recall now raises a clear `Engram::Error` when stored embedding metadata or vector dimensions
