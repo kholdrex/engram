@@ -27,8 +27,10 @@ module Engram
       original_content = record.content
       record = @before_persist.call(record) if @before_persist
       record = @persistence_policy.call(record) if record && @persistence_policy
-      record = record.with(embedding: @embedder.embed(record.content)) if record && record.content != original_content
-      record
+      if record && record.content != original_content
+        record = record.with(embedding: @embedder.embed(record.content))
+      end
+      record ? Engram::EmbeddingMetadata.attach(record, embedder: @embedder) : nil
     end
   end
 end

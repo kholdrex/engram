@@ -68,7 +68,13 @@ module Engram
 
       def payload(candidates, scope)
         items = candidates.each_with_index.map do |candidate, index|
-          existing = @store.search(embedding: candidate.embedding, scope: scope, limit: @neighbors)
+          existing = Engram::EmbeddingMetadata.search(
+            @store,
+            embedding: candidate.embedding,
+            embedding_metadata: Engram::EmbeddingMetadata.extract(candidate.metadata),
+            scope: scope,
+            limit: @neighbors
+          )
           {
             index: index,
             candidate: candidate.content,

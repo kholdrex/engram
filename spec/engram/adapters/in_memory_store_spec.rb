@@ -3,8 +3,21 @@
 RSpec.describe Engram::Adapters::InMemoryStore do
   subject(:store) { described_class.new }
 
-  def rec(content, scope:, embedding:, kind: :fact)
-    Engram::Record.new(content: content, scope: scope, embedding: embedding, kind: kind)
+  def rec(content, scope:, embedding:, kind: :fact, metadata: {})
+    Engram::Record.new(content: content, scope: scope, embedding: embedding, kind: kind, metadata: metadata)
+  end
+
+  def embedding_metadata(model: "model-a", dimensions: 2)
+    Engram::EmbeddingMetadata.build(
+      adapter: "test-adapter",
+      provider: "test",
+      model: model,
+      dimensions: dimensions
+    )
+  end
+
+  def metadata(model: "model-a", dimensions: 2)
+    Engram::EmbeddingMetadata.merge({}, embedding_metadata(model: model, dimensions: dimensions))
   end
 
   it "adds and returns the record" do
@@ -56,6 +69,39 @@ RSpec.describe Engram::Adapters::InMemoryStore do
 
     results = store.search(embedding: [1.0, 0.0], scope: "u:1", limit: 2)
     expect(results.map(&:content)).to eq(["near", "far"])
+  end
+
+  it "raises when a stored record has conflicting embedding metadata" do
+    store.add(rec("old model", scope: "u:1", embedding: [1.0, 0.0], metadata: metadata(model: "model-a")))
+
+    expect do
+      store.search(
+        embedding: [1.0, 0.0],
+        embedding_metadata: embedding_metadata(model: "model-b"),
+        scope: "u:1",
+        limit: 5
+      )
+    end.to raise_error(Engram::Error, /embedding metadata mismatch.*model/)
+  end
+
+  it "raises when query and stored vector lengths differ" do
+    store.add(rec("two dims", scope: "u:1", embedding: [1.0, 0.0]))
+
+    expect { store.search(embedding: [1.0, 0.0, 0.0], scope: "u:1", limit: 5) }
+      .to raise_error(Engram::Error, /embedding dimension mismatch/)
+  end
+
+  it "keeps legacy records without embedding metadata searchable" do
+    store.add(rec("legacy", scope: "u:1", embedding: [1.0, 0.0]))
+
+    results = store.search(
+      embedding: [1.0, 0.0],
+      embedding_metadata: embedding_metadata(model: "model-b"),
+      scope: "u:1",
+      limit: 5
+    )
+
+    expect(results.map(&:content)).to eq(["legacy"])
   end
 
   it "respects the limit" do

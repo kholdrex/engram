@@ -20,16 +20,20 @@ module Engram
         record
       end
 
-      def search(embedding:, scope:, limit:, kinds: nil)
+      def search(embedding:, scope:, limit:, kinds: nil, embedding_metadata: nil)
+        Engram::EmbeddingMetadata.validate_query!(embedding, embedding_metadata)
         allowed_kinds = normalize_kinds(kinds)
 
-        @records
+        results = @records
           .values
           .select { |r| searchable?(r, scope, allowed_kinds) }
           .map { |r| [r, Engram::Math.cosine_similarity(embedding, r.embedding)] }
           .sort_by { |(_, score)| -score }
           .first(limit)
           .map { |(record, _)| record }
+
+        results.each { |record| Engram::EmbeddingMetadata.validate_record!(record, embedding, embedding_metadata) }
+        results
       end
 
       def all(scope:)

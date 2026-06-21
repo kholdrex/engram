@@ -16,10 +16,11 @@ module Engram
     # persistence policy rejects the record.
     def add(content, kind: :fact, importance: 1.0, metadata: {})
       Engram::Instrumentation.instrument("add", Engram::Instrumentation.payload(scope: scope, store: @store, kind: kind)) do
+        embedding = @embedder.embed(content)
         record = Record.new(
           content: content,
           scope: scope,
-          embedding: @embedder.embed(content),
+          embedding: embedding,
           kind: kind,
           importance: importance,
           metadata: metadata

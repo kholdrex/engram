@@ -36,8 +36,16 @@ module Engram
         )
         Engram::Instrumentation.instrument("recall", payload) do
           embedding = @embedder.embed(query)
+          embedding_metadata = Engram::EmbeddingMetadata.for_embedder(@embedder, embedding: embedding)
           pool_limit = reranking? ? limit * @pool_factor : limit
-          pool = @store.search(embedding: embedding, scope: scope, limit: pool_limit, kinds: kinds)
+          pool = Engram::EmbeddingMetadata.search(
+            @store,
+            embedding: embedding,
+            embedding_metadata: embedding_metadata,
+            scope: scope,
+            limit: pool_limit,
+            kinds: kinds
+          )
 
           results = (reranking? ? rerank(pool, embedding) : pool).first(limit)
           touch(results) if @touch

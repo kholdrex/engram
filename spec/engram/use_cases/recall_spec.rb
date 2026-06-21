@@ -53,6 +53,27 @@ RSpec.describe Engram::UseCases::Recall do
     expect(results.map(&:content)).to eq(["prefers concise answers"])
   end
 
+  it "keeps legacy custom store search signatures compatible" do
+    legacy_store = Class.new do
+      attr_reader :received
+
+      def initialize(record)
+        @record = record
+      end
+
+      def search(embedding:, scope:, limit:, kinds: nil)
+        @received = {embedding: embedding, scope: scope, limit: limit, kinds: kinds}
+        [@record]
+      end
+    end.new(Engram::Record.new(content: "legacy", scope: "u:1", embedding: embedder.embed("legacy")))
+
+    results = described_class.new(store: legacy_store, embedder: embedder)
+      .call("legacy", scope: "u:1", limit: 1)
+
+    expect(results.map(&:content)).to eq(["legacy"])
+    expect(legacy_store.received).to include(scope: "u:1", limit: 1, kinds: nil)
+  end
+
   describe "ranking" do
     let(:fixed_embedder) do
       Class.new do
