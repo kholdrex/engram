@@ -54,8 +54,27 @@ if deps_available
 
     before { Engram::MemoryRecord.delete_all }
 
-    def rec(content, embedding:, scope: "u:1", kind: :fact)
-      Engram::Record.new(content: content, scope: scope, embedding: embedding, kind: kind)
+    def rec(content, embedding:, scope: "u:1", kind: :fact, metadata: {})
+      Engram::Record.new(
+        content: content,
+        scope: scope,
+        embedding: embedding,
+        kind: kind,
+        metadata: metadata
+      )
+    end
+
+    def embedding_metadata(model: "model-a", dimensions: 3)
+      Engram::EmbeddingMetadata.build(
+        adapter: "test-adapter",
+        provider: "test",
+        model: model,
+        dimensions: dimensions
+      )
+    end
+
+    def metadata(model: "model-a", dimensions: 3)
+      Engram::EmbeddingMetadata.merge({}, embedding_metadata(model: model, dimensions: dimensions))
     end
 
     it "persists a record and assigns an id" do
@@ -71,6 +90,32 @@ if deps_available
 
       results = store.search(embedding: [1.0, 0.0, 0.0], scope: "u:1", limit: 5)
       expect(results.map(&:content)).to eq(["near", "far"])
+    end
+
+    it "raises when a pgvector row has conflicting embedding metadata" do
+      store.add(rec("old model", embedding: [1.0, 0.0, 0.0], metadata: metadata(model: "model-a")))
+
+      expect do
+        store.search(
+          embedding: [1.0, 0.0, 0.0],
+          embedding_metadata: embedding_metadata(model: "model-b"),
+          scope: "u:1",
+          limit: 5
+        )
+      end.to raise_error(Engram::Error, /embedding metadata mismatch.*model/)
+    end
+
+    it "keeps legacy pgvector rows without embedding metadata searchable" do
+      store.add(rec("legacy", embedding: [1.0, 0.0, 0.0]))
+
+      results = store.search(
+        embedding: [1.0, 0.0, 0.0],
+        embedding_metadata: embedding_metadata(model: "model-b"),
+        scope: "u:1",
+        limit: 5
+      )
+
+      expect(results.map(&:content)).to eq(["legacy"])
     end
 
     it "filters by scope before nearest-neighbor ranking for adversarially similar records" do
