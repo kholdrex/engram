@@ -45,6 +45,10 @@ RSpec.describe Engram::Memory do
     expect do
       memory.add("hello", metadata: {"_engram" => {"user" => "data"}})
     end.to raise_error(Engram::Error, /reserved for Engram embedding metadata/)
+
+    expect do
+      memory.add("hello", metadata: {"_engram" => {}, :_engram => {user: "data"}})
+    end.to raise_error(Engram::Error, /reserved for Engram embedding metadata/)
   end
 
   it "applies the default persistence policy on add" do

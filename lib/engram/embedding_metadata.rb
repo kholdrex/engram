@@ -48,13 +48,13 @@ module Engram
 
     def merge(metadata, embedding_metadata)
       metadata = (metadata || {}).dup
-      reserved = metadata.delete(RESERVED_KEY) || metadata.delete(:_engram) || {}
-      unless reserved.is_a?(Hash)
+      reserved_values = [metadata.delete(RESERVED_KEY), metadata.delete(:_engram)].compact
+      unless reserved_values.all? { |reserved| reserved.is_a?(Hash) }
         raise Engram::Error,
           "metadata key #{RESERVED_KEY.inspect} is reserved for Engram embedding metadata"
       end
 
-      reserved = stringify_keys(reserved)
+      reserved = reserved_values.reduce({}) { |merged, reserved| merged.merge(stringify_keys(reserved)) }
       unexpected_reserved_keys = reserved.keys - [EMBEDDING_KEY]
       unless unexpected_reserved_keys.empty?
         raise Engram::Error,
