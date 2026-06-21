@@ -43,7 +43,10 @@ module Engram
 
     def extract(metadata)
       metadata = stringify_keys(metadata || {})
-      stringify_keys(metadata.dig(RESERVED_KEY, EMBEDDING_KEY) || {})
+      reserved = metadata[RESERVED_KEY]
+      return {} unless reserved.is_a?(Hash)
+
+      stringify_keys(reserved[EMBEDDING_KEY] || {})
     end
 
     def merge(metadata, embedding_metadata)

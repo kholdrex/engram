@@ -51,6 +51,17 @@ RSpec.describe Engram::Memory do
     end.to raise_error(Engram::Error, /reserved for Engram embedding metadata/)
   end
 
+  it "recalls legacy records with scalar reserved metadata as metadata-free records" do
+    store.add(Engram::Record.new(
+      content: "legacy fact",
+      scope: "user:1",
+      embedding: embedder.embed("legacy fact"),
+      metadata: {"_engram" => "legacy user data"}
+    ))
+
+    expect(memory.recall("legacy fact", limit: 1).map(&:content)).to eq(["legacy fact"])
+  end
+
   it "applies the default persistence policy on add" do
     result = memory.add("User API key is fake-token-abcdef")
 
