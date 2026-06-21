@@ -7,12 +7,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 - Embedding provenance metadata is stored with new memories so applications can detect model
-  and dimension drift during recall result validation.
+  and dimension drift during store search result validation.
 
 ### Changed
-- Recall now raises a clear `Engram::Error` when stored embedding metadata or vector dimensions
-  conflict with the active embedder, while legacy records without metadata remain searchable when
-  their vector dimensions match the active embedder.
+- Store search result validation now raises a clear `Engram::Error` when stored embedding
+  metadata or vector dimensions conflict with the active embedder, while legacy records without
+  metadata remain searchable when their vector dimensions match the active embedder.
 - Caller metadata keys named `_engram` are now reserved for Engram-owned embedding provenance;
   rename any application metadata stored under that key before adding new memories.
 
