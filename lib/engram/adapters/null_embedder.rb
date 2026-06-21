@@ -16,6 +16,15 @@ module Engram
 
       attr_reader :dimensions
 
+      def embedding_metadata
+        Engram::EmbeddingMetadata.build(
+          adapter: self.class.name,
+          provider: "null",
+          model: "null-embedder-v1",
+          dimensions: dimensions
+        )
+      end
+
       def embed(text)
         seed = Digest::SHA256.hexdigest(text.to_s)
         Array.new(@dimensions) do |i|

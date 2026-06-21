@@ -28,7 +28,8 @@ module Engram
         to_record(row)
       end
 
-      def search(embedding:, scope:, limit:, kinds: nil)
+      def search(embedding:, scope:, limit:, kinds: nil, embedding_metadata: nil)
+        Engram::EmbeddingMetadata.validate_query!(embedding, embedding_metadata)
         query = model.where(scope: scope)
         normalized_kinds = normalize_kinds(kinds)
         query = query.where(kind: normalized_kinds) if normalized_kinds
@@ -37,6 +38,7 @@ module Engram
           .nearest_neighbors(:embedding, embedding, distance: "cosine")
           .limit(limit)
           .map { |row| to_record(row) }
+          .tap { |records| validate_query_records!(records, embedding, embedding_metadata) }
       end
 
       def all(scope:)
@@ -67,6 +69,12 @@ module Engram
 
       def validate_scope!(scope)
         raise Engram::Error, "memory scope cannot be nil" if scope.nil?
+      end
+
+      def validate_query_records!(records, embedding, embedding_metadata)
+        records.each do |record|
+          Engram::EmbeddingMetadata.validate_record!(record, embedding, embedding_metadata)
+        end
       end
 
       def model

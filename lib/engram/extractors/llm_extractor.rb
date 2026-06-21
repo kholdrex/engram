@@ -58,14 +58,15 @@ module Engram
           next if content.empty?
           next if (fact["confidence"] || 1.0).to_f < @min_confidence
 
-          Engram::Record.new(
+          embedding = @embedder.embed(content)
+          Engram::EmbeddingMetadata.attach(Engram::Record.new(
             content: content,
             scope: scope,
             kind: fact["kind"] || "fact",
             importance: (fact["importance"] || 1.0).to_f,
             metadata: {confidence: (fact["confidence"] || 1.0).to_f},
-            embedding: @embedder.embed(content)
-          )
+            embedding: embedding
+          ), embedder: @embedder)
         end
       end
 

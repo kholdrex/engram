@@ -15,7 +15,13 @@ module Engram
 
       def reconcile_all(candidates:, scope:)
         Array(candidates).map do |candidate|
-          nearest = @store.search(embedding: candidate.embedding, scope: scope, limit: 1).first
+          nearest = Engram::EmbeddingMetadata.search(
+            @store,
+            embedding: candidate.embedding,
+            embedding_metadata: Engram::EmbeddingMetadata.extract(candidate.metadata),
+            scope: scope,
+            limit: 1
+          ).first
           similarity = nearest ? Engram::Math.cosine_similarity(candidate.embedding, nearest.embedding) : 0.0
 
           if nearest && similarity >= @similarity_threshold

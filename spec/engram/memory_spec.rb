@@ -26,6 +26,27 @@ RSpec.describe Engram::Memory do
     expect(record.embedding).to eq(embedder.embed("hello"))
   end
 
+  it "stores embedding metadata under the reserved namespace on add" do
+    record = memory.add("hello", metadata: {source: "spec"})
+
+    expect(record.metadata).to include(source: "spec")
+    expect(record.metadata.dig("_engram", "embedding")).to include(
+      "adapter" => "Engram::Adapters::NullEmbedder",
+      "model" => "null-embedder-v1",
+      "dimensions" => 16
+    )
+  end
+
+  it "raises clearly when user metadata collides with Engram's reserved namespace" do
+    expect do
+      memory.add("hello", metadata: {"_engram" => "user data"})
+    end.to raise_error(Engram::Error, /reserved for Engram embedding metadata/)
+
+    expect do
+      memory.add("hello", metadata: {"_engram" => {"user" => "data"}})
+    end.to raise_error(Engram::Error, /reserved for Engram embedding metadata/)
+  end
+
   it "applies the default persistence policy on add" do
     result = memory.add("User API key is fake-token-abcdef")
 
@@ -42,6 +63,7 @@ RSpec.describe Engram::Memory do
 
     expect(record.content).to eq("User billing email is [REDACTED]")
     expect(record.embedding).to eq(embedder.embed("User billing email is [REDACTED]"))
+    expect(record.metadata.dig("_engram", "embedding", "dimensions")).to eq(16)
     expect(memory.all.map(&:content)).to eq(["User billing email is [REDACTED]"])
   end
 

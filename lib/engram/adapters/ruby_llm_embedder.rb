@@ -15,7 +15,16 @@ module Engram
         @dimensions = dimensions
       end
 
-      attr_reader :dimensions
+      attr_reader :dimensions, :model
+
+      def embedding_metadata
+        Engram::EmbeddingMetadata.build(
+          adapter: self.class.name,
+          provider: "ruby_llm",
+          model: model,
+          dimensions: dimensions
+        )
+      end
 
       def embed(text)
         ensure_ruby_llm!
