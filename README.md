@@ -342,7 +342,7 @@ If you change embedder configuration (model/provider/dimensions), or if legacy m
 written without embedding provenance, run a scoped rebuild to refresh vectors and metadata:
 
 ```bash
-bundle exec rake "engram:rebuild_embeddings['user:42']"
+bundle exec rake "engram:rebuild_embeddings[user:42]"
 ```
 
 By default, only stale rows are rewritten. Set `STALE_ONLY=false` to rebuild all rows in

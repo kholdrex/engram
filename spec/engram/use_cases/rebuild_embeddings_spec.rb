@@ -88,4 +88,18 @@ RSpec.describe Engram::UseCases::RebuildEmbeddings do
       rebuild.call(scope: "u:1", batch_size: 0)
     end.to raise_error(ArgumentError, "batch_size must be greater than 0")
   end
+
+  it "tracks failed rows when embedding fails" do
+    add_record(content: "broken")
+
+    allow(embedder).to receive(:embed).and_raise(StandardError, "transform failed")
+
+    result = rebuild.call(scope: "u:1")
+
+    expect(result[:processed]).to eq(1)
+    expect(result[:updated]).to eq(0)
+    expect(result[:failed]).to eq(1)
+    expect(result[:failed_ids]).to eq([1])
+    expect(result[:skipped]).to eq(0)
+  end
 end
