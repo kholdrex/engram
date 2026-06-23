@@ -18,6 +18,7 @@ module Engram
     def run
       configure_embedder
       embedder = Engram.config.embedder
+      warn_if_null_embedder(embedder)
 
       puts "Recall:"
       run_recall(embedder)
@@ -34,7 +35,6 @@ module Engram
       puts "Consolidation (heuristic duplicate baseline):"
       heuristic_ok = run_heuristic_consolidation(embedder)
 
-      warn_if_null_embedder(embedder)
       exit(1) unless extraction_ok && consolidation_ok && heuristic_ok
     rescue => error
       raise unless ruby_llm_configuration_error?(error)
@@ -127,6 +127,8 @@ module Engram
         row[:relevant_retrieved] == row[:relevant_total]
       end
 
+      null_embedder = null_embedder?(embedder)
+
       metrics = {
         hit_count: hit_count,
         positive_count: positives.size,
@@ -137,43 +139,52 @@ module Engram
         distractor_total: distractor_total,
         contradiction_hits: contradiction_hits,
         contradiction_count: contradictions.size,
-        negative_count: negatives.size
+        negative_count: negatives.size,
+        semantic_metrics_available: !null_embedder
       }
 
       puts
-      puts format(
-        "  recall@%d: %.1f%% (%d/%d relevant memories)",
-        k,
-        percent(relevant_retrieved, relevant_total),
-        relevant_retrieved,
-        relevant_total
-      )
-      puts format(
-        "  hit-rate@%d: %.1f%% (%d/%d queries)",
-        k,
-        percent(hit_count, positives.size),
-        hit_count,
-        positives.size
-      )
-      puts format(
-        "  labelled precision proxy@%d: %.1f%% (%d/%d positive-query results)",
-        k,
-        percent(relevant_retrieved, positive_retrieved),
-        relevant_retrieved,
-        positive_retrieved
-      )
-      puts format(
-        "  near-distractor retrieval rate: %.1f%% (%d/%d labelled distractors)",
-        percent(distractor_retrieved, distractor_total),
-        distractor_retrieved,
-        distractor_total
-      )
-      puts format(
-        "  contradiction pair full-recall rate: %.1f%% (%d/%d labelled pairs)",
-        percent(contradiction_hits, contradictions.size),
-        contradiction_hits,
-        contradictions.size
-      )
+      if null_embedder
+        puts format("  recall@%d: n/a (NullEmbedder, not semantic)", k)
+        puts format("  hit-rate@%d: n/a (NullEmbedder, not semantic)", k)
+        puts format("  labelled precision proxy@%d: n/a (NullEmbedder, not semantic)", k)
+        puts "  near-distractor retrieval rate: n/a (NullEmbedder, not semantic)"
+        puts "  contradiction pair full-recall rate: n/a (NullEmbedder, not semantic)"
+      else
+        puts format(
+          "  recall@%d: %.1f%% (%d/%d relevant memories)",
+          k,
+          percent(relevant_retrieved, relevant_total),
+          relevant_retrieved,
+          relevant_total
+        )
+        puts format(
+          "  hit-rate@%d: %.1f%% (%d/%d queries)",
+          k,
+          percent(hit_count, positives.size),
+          hit_count,
+          positives.size
+        )
+        puts format(
+          "  labelled precision proxy@%d: %.1f%% (%d/%d positive-query results)",
+          k,
+          percent(relevant_retrieved, positive_retrieved),
+          relevant_retrieved,
+          positive_retrieved
+        )
+        puts format(
+          "  near-distractor retrieval rate: %.1f%% (%d/%d labelled distractors)",
+          percent(distractor_retrieved, distractor_total),
+          distractor_retrieved,
+          distractor_total
+        )
+        puts format(
+          "  contradiction pair full-recall rate: %.1f%% (%d/%d labelled pairs)",
+          percent(contradiction_hits, contradictions.size),
+          contradiction_hits,
+          contradictions.size
+        )
+      end
       puts format("  negative queries inspected: %d (top-k retrieval always returns rows)", negatives.size)
       metrics
     end
@@ -277,6 +288,10 @@ module Engram
       live_completion? ? "live-adapter" : "scripted"
     end
 
+    def null_embedder?(embedder)
+      embedder.is_a?(Engram::Adapters::NullEmbedder)
+    end
+
     def percent(numerator, denominator)
       return 0.0 if denominator.zero?
 
@@ -292,11 +307,12 @@ module Engram
     end
 
     def warn_if_null_embedder(embedder)
-      return unless embedder.is_a?(Engram::Adapters::NullEmbedder)
+      return unless null_embedder?(embedder)
 
-      puts
-      puts "NOTE: NullEmbedder is deterministic but not semantic."
+      puts "NOTE: NullEmbedder is deterministic and non-semantic."
+      puts "Recall metrics below are mechanics-only (n/a for semantic quality)."
       puts "Use ENGRAM_EMBEDDER=ruby_llm ENGRAM_EMBED_MODEL=text-embedding-3-small for honest recall numbers."
+      puts
     end
   end
 end
