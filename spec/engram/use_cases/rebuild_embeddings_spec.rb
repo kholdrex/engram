@@ -90,7 +90,20 @@ RSpec.describe Engram::UseCases::RebuildEmbeddings do
   end
 
   it "tracks failed rows when embedding fails" do
-    add_record(content: "broken")
+    add_record(
+      content: "broken",
+      metadata: {
+        "_engram" => {
+          "embedding" => {
+            "adapter" => "Engram::Adapters::InMemoryStore",
+            "provider" => "test",
+            "model" => "mismatch",
+            "dimensions" => 16,
+            "fingerprint" => "stale-fingerprint"
+          }
+        }
+      }
+    )
 
     allow(embedder).to receive(:embed).and_raise(StandardError, "transform failed")
 
