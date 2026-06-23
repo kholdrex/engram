@@ -338,6 +338,16 @@ Prune memories you no longer need:
 current_user.memory.forget_stale(older_than: 90 * 24 * 60 * 60, min_importance: 0.7)
 ```
 
+If you change embedder configuration (model/provider/dimensions), or if legacy memories were
+written without embedding provenance, run a scoped rebuild to refresh vectors and metadata:
+
+```bash
+bundle exec rake "engram:rebuild_embeddings['user:42']"
+```
+
+By default, only stale rows are rewritten. Set `STALE_ONLY=false` to rebuild all rows in
+the scope, and `BATCH_SIZE=<n>` to tune write size.
+
 ## Observability
 
 When ActiveSupport is loaded, Engram emits `ActiveSupport::Notifications` events for the

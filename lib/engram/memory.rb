@@ -86,6 +86,17 @@ module Engram
       @store.all(scope: scope)
     end
 
+    # Recompute embeddings (and embedding metadata) for memories in the scope.
+    # When `stale_only` is true, only records whose current metadata does not match the
+    # active embedder are rebuilt.
+    def rebuild_embeddings(stale_only: true, batch_size: 100)
+      UseCases::RebuildEmbeddings.new(store: @store, embedder: @embedder).call(
+        scope: scope,
+        stale_only: stale_only,
+        batch_size: batch_size
+      )
+    end
+
     # Prune stale memories. `older_than` is a duration in seconds; `min_importance` keeps
     # memories at or above that importance even when old. Returns the forgotten records.
     def forget_stale(older_than:, min_importance: Float::INFINITY)
