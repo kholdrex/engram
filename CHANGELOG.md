@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 - Embedding provenance metadata is stored with new memories so applications can detect model
   and dimension drift during store search result validation.
+- `Memory#rebuild_embeddings` and `Engram::UseCases::RebuildEmbeddings` for scoped,
+  deterministic rebuilding of stale vectors plus provenance metadata.
+- Added a focused rake task `engram:rebuild_embeddings` with batch control and optional
+  forced full-scope rebuild mode for recovery after provider/model changes.
 
 ### Changed
 - Store search result validation now raises a clear `Engram::Error` when stored embedding

@@ -158,4 +158,12 @@ RSpec.describe Engram::Memory do
     memory.forget_stale(older_than: 30 * 24 * 60 * 60)
     expect(memory.all).to be_empty
   end
+
+  it "rebuilds embeddings through the Memory facade" do
+    store.add(Engram::Record.new(content: "legacy", scope: "user:1", embedding: embedder.embed("legacy")))
+
+    result = memory.rebuild_embeddings
+
+    expect(result).to include(scope: "user:1", updated: 1, processed: 1, skipped: 0)
+  end
 end
