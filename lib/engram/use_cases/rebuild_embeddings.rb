@@ -41,7 +41,7 @@ module Engram
                 rebuilt = EmbeddingMetadata.attach(rebuilt, embedder: @embedder)
                 @store.update(id: record.id, record: rebuilt)
                 counts[:updated] += 1
-              rescue StandardError
+              rescue
                 counts[:failed] += 1
                 counts[:failed_ids] << record.id
               end
@@ -63,8 +63,7 @@ module Engram
         required = %w[adapter provider model dimensions fingerprint]
         return true if required.any? { |key| stored[key] != expected[key] }
 
-        return true if
-          stored["dimensions"] &&
+        return true if stored["dimensions"] &&
           record.embedding.respond_to?(:length) &&
           record.embedding.length != stored["dimensions"].to_i
 
