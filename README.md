@@ -61,6 +61,41 @@ chat.ask("Why am I being rate limited?")
 - Persistence policy that rejects obvious secrets and transient task-progress updates before storage.
 - Idempotent observation, recency/importance-aware ranking, recall touching, and stale-memory pruning.
 
+
+## API stability and migration posture
+
+Engram is intentionally marked pre-1.0; default behavior is to prioritize safety and compatibility, while still allowing occasional focused API additions.
+
+### Current public surface
+
+The following are part of the documented public surface and should remain stable except where
+explicitly version-gated:
+
+- Core types and facade: `Engram::Memory`, `Engram::Record`, `Engram::Decision`, `Engram::PersistencePolicy`, and `Engram.with_memory`.
+- Store and adapter ports: `Engram::Ports::MemoryStore`, `Engram::Ports::Embedder`, `Engram::Ports::Completion`.
+- Rails integration points: `has_memory`, `Memory#observe_later`, and generator outputs under `engram:` rake tasks.
+- Lifecycle methods in `Engram::Memory`: `add`, `recall`, `inject_into`, `observe`, `observe_later`, `forget_stale`, and `rebuild_embeddings`.
+- RubyLLM adapter contract points and evaluator entrypoints (`rake eval`, `rake eval:real`).
+
+### Backward-compatibility commitments (pre-1.0)
+
+- Compatibility adjustments should be additive where possible.
+- Behavioral changes that could break callers should be documented under `CHANGELOG.md` and tested with migration scenarios.
+- Legacy compatibility notes already in effect:
+  - `kind: "semantic"` is normalized to `:fact` for read paths.
+  - Existing rows created without embedding provenance are still readable when dimensions match the active embedder.
+
+### 1.0 pre-freeze checklist
+
+Before the 1.0 release marker, freeze the public API by:
+
+1. Finalizing configuration and initializer keys in docs and examples.
+2. Writing upgrade notes for any remaining behavior-shifting defaults.
+3. Verifying migrations/rebuild flows for legacy rows remain deterministic and reversible.
+4. Keeping security and persistence-policy boundaries explicit in host-app guidance.
+
+Use `CHANGELOG.md` as the authoritative source for breaking/compatibility changes while still in pre-1.0.
+
 ## Installation
 
 ```ruby
