@@ -46,6 +46,18 @@ RSpec.describe Engram::UseCases::RebuildEmbeddings do
     expect(result[:processed]).to eq(2)
   end
 
+  it "walks multiple batches without skipping records" do
+    add_record(content: "first")
+    add_record(content: "second")
+    add_record(content: "third")
+
+    result = rebuild.call(scope: "u:1", stale_only: false, batch_size: 2)
+
+    expect(result[:processed]).to eq(3)
+    expect(result[:updated]).to eq(3)
+    expect(result[:skipped]).to eq(0)
+  end
+
   it "only processes records in the requested scope" do
     add_record(content: "in_scope", metadata: {})
     add_record(content: "other_scope", scope: "u:2", metadata: {})
@@ -90,20 +102,13 @@ RSpec.describe Engram::UseCases::RebuildEmbeddings do
   end
 
   it "tracks failed rows when embedding fails" do
-    add_record(
+    stale_record = Engram::Record.new(
       content: "broken",
-      metadata: {
-        "_engram" => {
-          "embedding" => {
-            "adapter" => "Engram::Adapters::InMemoryStore",
-            "provider" => "test",
-            "model" => "mismatch",
-            "dimensions" => 16,
-            "fingerprint" => "stale-fingerprint"
-          }
-        }
-      }
+      scope: "u:1",
+      embedding: embedder.embed("broken"),
+      metadata: {}
     )
+    store.add(stale_record)
 
     allow(embedder).to receive(:embed).and_raise(StandardError, "transform failed")
 
@@ -113,6 +118,12 @@ RSpec.describe Engram::UseCases::RebuildEmbeddings do
     expect(result[:updated]).to eq(0)
     expect(result[:failed]).to eq(1)
     expect(result[:failed_ids]).to eq([1])
+    expect(result[:failed_errors]).to include(
+      1 => {
+        class: "StandardError",
+        message: "transform failed"
+      }
+    )
     expect(result[:skipped]).to eq(0)
   end
 end

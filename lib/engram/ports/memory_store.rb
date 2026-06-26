@@ -18,7 +18,10 @@ module Engram
       end
 
       # All Records for a scope (mostly for inspection/tests).
-      def all(scope:)
+      # Supports optional `limit` and `offset` for batching large sweeps.
+      # Returned records are sorted in stable `id` order when batching is used.
+      # Use `after_id` for keyset pagination.
+      def all(scope:, limit: nil, offset: 0, after_id: nil)
         raise NotImplementedError, "#{self.class} must implement #all"
       end
 

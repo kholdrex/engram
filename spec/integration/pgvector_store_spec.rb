@@ -183,6 +183,18 @@ if deps_available
       expect(store.all(scope: "u:1").map(&:content)).to eq(["plan is Pro"])
     end
 
+    it "supports batched scope reads with stable ordering" do
+      first_record = store.add(rec("third", embedding: [1.0, 0.0, 0.0]))
+      second_record = store.add(rec("first", embedding: [1.0, 0.0, 0.0]))
+      third_record = store.add(rec("second", embedding: [1.0, 0.0, 0.0]))
+
+      expect(store.all(scope: "u:1", limit: 2).map(&:content)).to eq(["third", "first"])
+      expect(store.all(scope: "u:1", offset: 1, limit: 2).map(&:content)).to eq(["first", "second"])
+      expect(store.all(scope: "u:1", after_id: third_record.id).map(&:content)).to be_empty
+      expect(store.all(scope: "u:1", after_id: first_record.id).map(&:content)).to eq(["first", "second"])
+      expect(store.all(scope: "u:1", after_id: second_record.id).map(&:content)).to eq(["second"])
+    end
+
     it "deletes a record by id" do
       stored = store.add(rec("temp", embedding: [1.0, 0.0, 0.0]))
       store.delete(id: stored.id)

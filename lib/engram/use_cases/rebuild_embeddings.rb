@@ -7,7 +7,9 @@ module Engram
     #   - :processed: total rows examined in scope
     #   - :updated: rows re-embedded and persisted
     #   - :skipped: rows skipped because they were unchanged or incomplete
-    #   - :failed: row IDs that failed during rebuild
+    #   - :failed: count of rows that failed during rebuild
+    #   - :failed_ids: record IDs that failed during rebuild
+    #   - :failed_errors: error class/message keyed by failed record ID
     class RebuildEmbeddings
       def initialize(store:, embedder:)
         @store = store
@@ -18,35 +20,52 @@ module Engram
         batch_size = Integer(batch_size)
         raise ArgumentError, "batch_size must be greater than 0" unless batch_size.positive?
 
-        counts = {processed: 0, updated: 0, skipped: 0, failed: 0, failed_ids: []}
+        counts = {
+          processed: 0,
+          updated: 0,
+          skipped: 0,
+          failed: 0,
+          failed_ids: [],
+          failed_errors: {}
+        }
 
-        @store.all(scope: scope)
-          .each_slice(batch_size)
-          .each do |batch|
-            batch.each do |record|
-              counts[:processed] += 1
+        after_id = nil
+        loop do
+          batch = @store.all(scope: scope, limit: batch_size, after_id: after_id)
+          break if batch.empty?
 
-              if record.id.nil?
-                counts[:skipped] += 1
-                next
-              end
+          batch.each do |record|
+            counts[:processed] += 1
 
-              if stale_only && !stale?(record)
-                counts[:skipped] += 1
-                next
-              end
+            if record.id.nil?
+              counts[:skipped] += 1
+              next
+            end
 
-              begin
-                rebuilt = record.with(embedding: @embedder.embed(record.content))
-                rebuilt = EmbeddingMetadata.attach(rebuilt, embedder: @embedder)
-                @store.update(id: record.id, record: rebuilt)
-                counts[:updated] += 1
-              rescue
-                counts[:failed] += 1
-                counts[:failed_ids] << record.id
-              end
+            if stale_only && !stale?(record)
+              counts[:skipped] += 1
+              next
+            end
+
+            begin
+              rebuilt = record.with(embedding: @embedder.embed(record.content))
+              rebuilt = EmbeddingMetadata.attach(rebuilt, embedder: @embedder)
+              @store.update(id: record.id, record: rebuilt)
+              counts[:updated] += 1
+            rescue => error
+              counts[:failed] += 1
+              record_id = record.id
+              counts[:failed_ids] << record_id
+              counts[:failed_errors][record_id] = {
+                class: error.class.name,
+                message: error.message
+              }
+              warn "Rebuild failed for record ##{record_id}: #{error.class}: #{error.message}"
             end
           end
+
+          after_id = batch.last.id
+        end
 
         {scope: scope, **counts}
       end
