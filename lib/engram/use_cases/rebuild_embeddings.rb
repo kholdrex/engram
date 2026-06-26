@@ -70,7 +70,10 @@ module Engram
           if legacy_records
             legacy_index += batch.length
           else
-            after_id = batch.last.id
+            cursor_record = batch.reverse.find { |candidate| !candidate.id.nil? }
+            break if cursor_record.nil? || cursor_record != batch.last
+
+            after_id = cursor_record.id
           end
         end
 
