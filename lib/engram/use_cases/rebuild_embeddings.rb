@@ -11,8 +11,6 @@ module Engram
     #   - :failed_ids: record IDs that failed during rebuild
     #   - :failed_errors: error class/message keyed by failed record ID
     class RebuildEmbeddings
-      LEGACY_BATCH_UNSUPPORTED = Object.new.freeze
-
       def initialize(store:, embedder:)
         @store = store
         @embedder = embedder
@@ -87,23 +85,25 @@ module Engram
         end
 
         records = modern_batch(scope:, batch_size:, after_id:)
-        return {records:} unless records.equal?(LEGACY_BATCH_UNSUPPORTED)
+        return {records:} if records
 
         legacy_records = Array(@store.all(scope: scope))
         {records: legacy_records.slice(legacy_index, batch_size) || [], legacy_records:}
       end
 
       def modern_batch(scope:, batch_size:, after_id:)
-        @store.all(scope: scope, limit: batch_size, after_id: after_id)
-      rescue ArgumentError => error
-        raise unless legacy_batch_signature_error?(error)
+        return unless batched_all_supported?
 
-        LEGACY_BATCH_UNSUPPORTED
+        @store.all(scope: scope, limit: batch_size, after_id: after_id)
       end
 
-      def legacy_batch_signature_error?(error)
-        message = error.message
-        message.include?("unknown keyword") || message.include?("unknown keywords")
+      def batched_all_supported?
+        parameters = @store.method(:all).parameters
+        keyword_names = parameters.filter_map do |kind, name|
+          name if [:keyreq, :key].include?(kind)
+        end
+
+        keyword_names.include?(:limit) && keyword_names.include?(:after_id)
       end
 
       def stale?(record)

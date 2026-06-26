@@ -108,6 +108,56 @@ RSpec.describe Engram::UseCases::RebuildEmbeddings do
     expect(legacy_store.records.map(&:embedding)).to all(satisfy { |embedding| !embedding.nil? && !embedding.empty? })
   end
 
+  it "falls back when a legacy store accepts extra keywords but ignores batching" do
+    permissive_store_class = Class.new do
+      include Engram::Ports::MemoryStore
+
+      attr_reader :records
+
+      def initialize(records)
+        @records = records
+      end
+
+      def add(record)
+        @records << record
+        record
+      end
+
+      def search(...) = raise NotImplementedError
+
+      def all(scope:, **_kwargs)
+        @records.select { |record| record.scope == scope }
+      end
+
+      def update(id:, record:)
+        index = @records.index { |existing| existing.id == id }
+        @records[index] = record
+        record
+      end
+
+      def delete(id:) = raise NotImplementedError
+
+      def touch(id:, at: Time.now) = raise NotImplementedError
+    end
+
+    permissive_store = permissive_store_class.new([
+      add_record(content: "first"),
+      add_record(content: "second"),
+      add_record(content: "third")
+    ])
+
+    result = described_class.new(store: permissive_store, embedder: embedder).call(
+      scope: "u:1",
+      stale_only: false,
+      batch_size: 2
+    )
+
+    expect(result[:processed]).to eq(3)
+    expect(result[:updated]).to eq(3)
+    expect(result[:skipped]).to eq(0)
+    expect(permissive_store.records.map(&:embedding)).to all(satisfy { |embedding| !embedding.nil? && !embedding.empty? })
+  end
+
   it "only processes records in the requested scope" do
     add_record(content: "in_scope", metadata: {})
     add_record(content: "other_scope", scope: "u:2", metadata: {})
