@@ -11,6 +11,8 @@ module Engram
     #   - :failed_ids: record IDs that failed during rebuild
     #   - :failed_errors: error class/message keyed by failed record ID
     class RebuildEmbeddings
+      LEGACY_BATCH_UNSUPPORTED = Object.new.freeze
+
       def initialize(store:, embedder:)
         @store = store
         @embedder = embedder
@@ -30,8 +32,12 @@ module Engram
         }
 
         after_id = nil
+        legacy_index = 0
+        legacy_records = nil
         loop do
-          batch = @store.all(scope: scope, limit: batch_size, after_id: after_id)
+          batch_result = fetch_batch(scope:, batch_size:, after_id:, legacy_records:, legacy_index:)
+          legacy_records = batch_result[:legacy_records] if batch_result[:legacy_records]
+          batch = batch_result[:records]
           break if batch.empty?
 
           batch.each do |record|
@@ -63,14 +69,42 @@ module Engram
               warn "Rebuild failed for record ##{record_id}: #{error.class}: #{error.message}"
             end
           end
-
-          after_id = batch.last.id
+          if legacy_records
+            legacy_index += batch.length
+          else
+            after_id = batch.last.id
+          end
         end
 
         {scope: scope, **counts}
       end
 
       private
+
+      def fetch_batch(scope:, batch_size:, after_id:, legacy_records:, legacy_index:)
+        if legacy_records
+          return {records: legacy_records.slice(legacy_index, batch_size) || [], legacy_records:}
+        end
+
+        records = modern_batch(scope:, batch_size:, after_id:)
+        return {records:} unless records.equal?(LEGACY_BATCH_UNSUPPORTED)
+
+        legacy_records = Array(@store.all(scope: scope))
+        {records: legacy_records.slice(legacy_index, batch_size) || [], legacy_records:}
+      end
+
+      def modern_batch(scope:, batch_size:, after_id:)
+        @store.all(scope: scope, limit: batch_size, after_id: after_id)
+      rescue ArgumentError => error
+        raise unless legacy_batch_signature_error?(error)
+
+        LEGACY_BATCH_UNSUPPORTED
+      end
+
+      def legacy_batch_signature_error?(error)
+        message = error.message
+        message.include?("unknown keyword") || message.include?("unknown keywords")
+      end
 
       def stale?(record)
         stored = EmbeddingMetadata.extract(record.metadata)
