@@ -41,8 +41,12 @@ module Engram
           .tap { |records| validate_query_records!(records, embedding, embedding_metadata) }
       end
 
-      def all(scope:)
-        model.where(scope: scope).map { |row| to_record(row) }
+      def all(scope:, limit: nil, offset: 0, after_id: nil)
+        query = model.where(scope: scope).order(:id)
+        query = query.where("id > ?", after_id) if after_id
+        query = query.limit(limit) if limit
+        query = query.offset(offset) if offset > 0
+        query.map { |row| to_record(row) }
       end
 
       def update(id:, record:)

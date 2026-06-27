@@ -46,6 +46,179 @@ RSpec.describe Engram::UseCases::RebuildEmbeddings do
     expect(result[:processed]).to eq(2)
   end
 
+  it "walks multiple batches without skipping records" do
+    add_record(content: "first")
+    add_record(content: "second")
+    add_record(content: "third")
+
+    result = rebuild.call(scope: "u:1", stale_only: false, batch_size: 2)
+
+    expect(result[:processed]).to eq(3)
+    expect(result[:updated]).to eq(3)
+    expect(result[:skipped]).to eq(0)
+  end
+
+  it "does not refetch forever when a batched page ends with a nil-id record" do
+    malformed_record = Engram::Record.new(
+      id: nil,
+      content: "legacy without id",
+      scope: "u:1",
+      embedding: embedder.embed("legacy without id"),
+      metadata: {}
+    )
+    valid_record = Engram::Record.new(
+      id: 1,
+      content: "first",
+      scope: "u:1",
+      embedding: embedder.embed("first"),
+      metadata: {}
+    )
+
+    store_class = Class.new do
+      include Engram::Ports::MemoryStore
+
+      attr_reader :all_calls
+
+      def initialize(records)
+        @records = records
+        @all_calls = 0
+      end
+
+      def add(record) = raise NotImplementedError
+      def search(...) = raise NotImplementedError
+      def delete(id:) = raise NotImplementedError
+      def touch(id:, at: Time.now) = raise NotImplementedError
+
+      def all(scope:, limit: nil, offset: 0, after_id: nil)
+        @all_calls += 1
+        records = @records.select { |record| record.scope == scope }
+        records = records.drop_while { |record| !after_id.nil? && record.id && record.id <= after_id }
+        records = records.drop(offset) if offset.positive?
+        records = records.take(limit) if limit
+        records
+      end
+
+      def update(id:, record:)
+        index = @records.index { |existing| existing.id == id }
+        @records[index] = record
+        record
+      end
+    end
+
+    paged_store = store_class.new([valid_record, malformed_record])
+
+    result = described_class.new(store: paged_store, embedder: embedder).call(
+      scope: "u:1",
+      stale_only: false,
+      batch_size: 2
+    )
+
+    expect(result[:processed]).to eq(2)
+    expect(result[:updated]).to eq(1)
+    expect(result[:skipped]).to eq(1)
+    expect(paged_store.all_calls).to eq(1)
+  end
+
+  it "falls back to legacy stores that only support all(scope:)" do
+    legacy_store_class = Class.new do
+      include Engram::Ports::MemoryStore
+
+      attr_reader :records
+
+      def initialize(records)
+        @records = records
+      end
+
+      def add(record)
+        @records << record
+        record
+      end
+
+      def search(...) = raise NotImplementedError
+
+      def all(scope:)
+        @records.select { |record| record.scope == scope }
+      end
+
+      def update(id:, record:)
+        index = @records.index { |existing| existing.id == id }
+        @records[index] = record
+        record
+      end
+
+      def delete(id:) = raise NotImplementedError
+
+      def touch(id:, at: Time.now) = raise NotImplementedError
+    end
+
+    legacy_store = legacy_store_class.new([
+      add_record(content: "first"),
+      add_record(content: "second"),
+      add_record(content: "third")
+    ])
+
+    result = described_class.new(store: legacy_store, embedder: embedder).call(
+      scope: "u:1",
+      stale_only: false,
+      batch_size: 2
+    )
+
+    expect(result[:processed]).to eq(3)
+    expect(result[:updated]).to eq(3)
+    expect(result[:skipped]).to eq(0)
+    expect(legacy_store.records.map(&:embedding)).to all(satisfy { |embedding| !embedding.nil? && !embedding.empty? })
+  end
+
+  it "falls back when a legacy store accepts extra keywords but ignores batching" do
+    permissive_store_class = Class.new do
+      include Engram::Ports::MemoryStore
+
+      attr_reader :records
+
+      def initialize(records)
+        @records = records
+      end
+
+      def add(record)
+        @records << record
+        record
+      end
+
+      def search(...) = raise NotImplementedError
+
+      def all(scope:, **_kwargs)
+        @records.select { |record| record.scope == scope }
+      end
+
+      def update(id:, record:)
+        index = @records.index { |existing| existing.id == id }
+        @records[index] = record
+        record
+      end
+
+      def delete(id:) = raise NotImplementedError
+
+      def touch(id:, at: Time.now) = raise NotImplementedError
+    end
+
+    permissive_store = permissive_store_class.new([
+      add_record(content: "first"),
+      add_record(content: "second"),
+      add_record(content: "third")
+    ])
+
+    result = described_class.new(store: permissive_store, embedder: embedder).call(
+      scope: "u:1",
+      stale_only: false,
+      batch_size: 2
+    )
+
+    expect(result[:processed]).to eq(3)
+    expect(result[:updated]).to eq(3)
+    expect(result[:skipped]).to eq(0)
+    expect(permissive_store.records.map(&:embedding)).to all(satisfy { |embedding| !embedding.nil? && !embedding.empty? })
+  end
+
   it "only processes records in the requested scope" do
     add_record(content: "in_scope", metadata: {})
     add_record(content: "other_scope", scope: "u:2", metadata: {})
@@ -90,20 +263,13 @@ RSpec.describe Engram::UseCases::RebuildEmbeddings do
   end
 
   it "tracks failed rows when embedding fails" do
-    add_record(
+    stale_record = Engram::Record.new(
       content: "broken",
-      metadata: {
-        "_engram" => {
-          "embedding" => {
-            "adapter" => "Engram::Adapters::InMemoryStore",
-            "provider" => "test",
-            "model" => "mismatch",
-            "dimensions" => 16,
-            "fingerprint" => "stale-fingerprint"
-          }
-        }
-      }
+      scope: "u:1",
+      embedding: embedder.embed("broken"),
+      metadata: {}
     )
+    store.add(stale_record)
 
     allow(embedder).to receive(:embed).and_raise(StandardError, "transform failed")
 
@@ -113,6 +279,12 @@ RSpec.describe Engram::UseCases::RebuildEmbeddings do
     expect(result[:updated]).to eq(0)
     expect(result[:failed]).to eq(1)
     expect(result[:failed_ids]).to eq([1])
+    expect(result[:failed_errors]).to include(
+      1 => {
+        class: "StandardError",
+        message: "transform failed"
+      }
+    )
     expect(result[:skipped]).to eq(0)
   end
 end

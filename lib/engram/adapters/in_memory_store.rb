@@ -36,8 +36,12 @@ module Engram
         results
       end
 
-      def all(scope:)
-        @records.values.select { |r| r.scope == scope }
+      def all(scope:, limit: nil, offset: 0, after_id: nil)
+        records = @records.values.select { |r| r.scope == scope }.sort_by { |record| record.id }
+        records = records.drop_while { |record| !after_id.nil? && record.id && record.id <= after_id }
+        records = records.drop(offset) if offset > 0
+        records = records.take(limit) if limit
+        records
       end
 
       def update(id:, record:)
