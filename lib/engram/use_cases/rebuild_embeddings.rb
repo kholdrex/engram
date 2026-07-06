@@ -32,11 +32,21 @@ module Engram
         after_id = nil
         legacy_index = 0
         legacy_records = nil
+        traversed_count = 0
         loop do
           batch_result = fetch_batch(scope:, batch_size:, after_id:, legacy_records:, legacy_index:)
           legacy_records = batch_result[:legacy_records] if batch_result[:legacy_records]
           batch = batch_result[:records]
           break if batch.empty?
+
+          cursor_record = batch.reverse.find { |candidate| !candidate.id.nil? } unless legacy_records
+
+          if !legacy_records && fallback_before_processing?(batch:, after_id:)
+            legacy_records = Array(@store.all(scope: scope))
+            legacy_index = traversed_count
+            batch = legacy_records.slice(legacy_index, batch_size) || []
+            break if batch.empty?
+          end
 
           batch.each do |record|
             counts[:processed] += 1
@@ -67,14 +77,29 @@ module Engram
               warn "Rebuild failed for record ##{record_id}: #{error.class}: #{error.message}"
             end
           end
+
+          traversed_count += batch.length unless legacy_records
+
           if legacy_records
             legacy_index += batch.length
-          else
-            cursor_record = batch.reverse.find { |candidate| !candidate.id.nil? }
-            break if cursor_record.nil? || cursor_record != batch.last
-
-            after_id = cursor_record.id
+            next
           end
+
+          if cursor_record.nil?
+            legacy_records = Array(@store.all(scope: scope))
+            legacy_index = traversed_count
+            break if legacy_index >= legacy_records.length
+
+            next
+          end
+
+          if fallback_to_legacy_batching?(batch:, cursor_record:)
+            legacy_records = Array(@store.all(scope: scope))
+            legacy_index = traversed_count
+            next
+          end
+
+          after_id = cursor_record.id
         end
 
         {scope: scope, **counts}
@@ -107,6 +132,17 @@ module Engram
         end
 
         keyword_names.include?(:limit) && keyword_names.include?(:after_id)
+      end
+
+      def fallback_to_legacy_batching?(batch:, cursor_record:)
+        cursor_record != batch.last
+      end
+
+      def fallback_before_processing?(batch:, after_id:)
+        return false if after_id.nil?
+        return true if batch.any? { |record| record.id.nil? }
+
+        batch.any? { |record| record.id && record.id <= after_id }
       end
 
       def stale?(record)
