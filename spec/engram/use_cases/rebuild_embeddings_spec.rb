@@ -416,6 +416,53 @@ RSpec.describe Engram::UseCases::RebuildEmbeddings do
     expect(result[:skipped]).to eq(1)
   end
 
+  it "falls back when a later batched page repeats the same valid id" do
+    paged_store_class = Class.new do
+      include Engram::Ports::MemoryStore
+
+      def initialize(records)
+        @records = records
+      end
+
+      def add(record) = raise NotImplementedError
+      def search(...) = raise NotImplementedError
+      def delete(id:) = raise NotImplementedError
+      def touch(id:, at: Time.now) = raise NotImplementedError
+
+      def all(scope:, limit: nil, after_id: nil)
+        records = @records.select { |record| record.scope == scope }
+        return records.take(limit || records.length) if after_id.nil?
+
+        duplicated_page = [records[2], records[2], records[3]]
+        duplicated_page.take(limit || duplicated_page.length)
+      end
+
+      def update(id:, record:)
+        index = @records.index { |existing| existing.id == id }
+        @records[index] = record
+        record
+      end
+    end
+
+    paged_store = paged_store_class.new([
+      Engram::Record.new(id: 1, content: "first", scope: "u:1", embedding: embedder.embed("first"), metadata: {}),
+      Engram::Record.new(id: 2, content: "second", scope: "u:1", embedding: embedder.embed("second"), metadata: {}),
+      Engram::Record.new(id: 3, content: "third", scope: "u:1", embedding: embedder.embed("third"), metadata: {}),
+      Engram::Record.new(id: 4, content: "fourth", scope: "u:1", embedding: embedder.embed("fourth"), metadata: {})
+    ])
+
+    result = described_class.new(store: paged_store, embedder: embedder).call(
+      scope: "u:1",
+      stale_only: false,
+      batch_size: 2
+    )
+
+    expect(result[:processed]).to eq(4)
+    expect(result[:updated]).to eq(4)
+    expect(result[:skipped]).to eq(0)
+    expect(paged_store.all(scope: "u:1").map(&:content)).to eq(%w[first second third fourth])
+  end
+
   it "only processes records in the requested scope" do
     add_record(content: "in_scope", metadata: {})
     add_record(content: "other_scope", scope: "u:2", metadata: {})

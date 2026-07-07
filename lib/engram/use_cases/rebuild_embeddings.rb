@@ -139,6 +139,8 @@ module Engram
       end
 
       def fallback_before_processing?(batch:, after_id:)
+        ids = batch.filter_map(&:id)
+        return true if ids.uniq.length != ids.length
         return false if after_id.nil?
         return true if batch.any? { |record| record.id.nil? }
 
