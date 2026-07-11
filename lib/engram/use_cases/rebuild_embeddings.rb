@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "set"
+
 module Engram
   module UseCases
     # Rebuild stored embeddings when the active embedder configuration changes.
@@ -32,23 +34,36 @@ module Engram
         after_id = nil
         legacy_index = 0
         legacy_records = nil
-        traversed_count = 0
+        processed_ids = Set.new
+        processed_nil_records = Set.new
         loop do
           batch_result = fetch_batch(scope:, batch_size:, after_id:, legacy_records:, legacy_index:)
           legacy_records = batch_result[:legacy_records] if batch_result[:legacy_records]
           batch = batch_result[:records]
-          break if batch.empty?
+          if batch.empty?
+            break if legacy_records
+
+            # Reconcile with one stable snapshot: accepting keyset keywords does
+            # not guarantee that an adapter returns complete, ordered pages.
+            legacy_records = Array(@store.all(scope: scope))
+            legacy_index = 0
+            next
+          end
 
           cursor_record = batch.reverse.find { |candidate| !candidate.id.nil? } unless legacy_records
 
           if !legacy_records && fallback_before_processing?(batch:, after_id:)
             legacy_records = Array(@store.all(scope: scope))
-            legacy_index = traversed_count
+            legacy_index = 0
             batch = legacy_records.slice(legacy_index, batch_size) || []
             break if batch.empty?
           end
 
           batch.each do |record|
+            identity = record.id.nil? ? record.object_id : record.id
+            seen = record.id.nil? ? processed_nil_records : processed_ids
+            next unless seen.add?(identity)
+
             counts[:processed] += 1
 
             if record.id.nil?
@@ -78,8 +93,6 @@ module Engram
             end
           end
 
-          traversed_count += batch.length unless legacy_records
-
           if legacy_records
             legacy_index += batch.length
             next
@@ -87,15 +100,13 @@ module Engram
 
           if cursor_record.nil?
             legacy_records = Array(@store.all(scope: scope))
-            legacy_index = traversed_count
-            break if legacy_index >= legacy_records.length
-
+            legacy_index = 0
             next
           end
 
           if fallback_to_legacy_batching?(batch:, cursor_record:)
             legacy_records = Array(@store.all(scope: scope))
-            legacy_index = traversed_count
+            legacy_index = 0
             next
           end
 

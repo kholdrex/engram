@@ -463,6 +463,73 @@ RSpec.describe Engram::UseCases::RebuildEmbeddings do
     expect(paged_store.all(scope: "u:1").map(&:content)).to eq(%w[first second third fourth])
   end
 
+  it "reconciles adversarial pages by ID against a stable snapshot" do
+    record = ->(id) do
+      Engram::Record.new(
+        id: id,
+        content: id ? "record-#{id}" : "record-without-id",
+        scope: "u:1",
+        embedding: embedder.embed(id.to_s),
+        metadata: {}
+      )
+    end
+
+    adversarial_store_class = Class.new do
+      include Engram::Ports::MemoryStore
+
+      attr_reader :updated_ids, :all_calls
+
+      def initialize(snapshot, pages)
+        @snapshot = snapshot
+        @pages = pages
+        @updated_ids = []
+        @all_calls = 0
+      end
+
+      def all(scope:, limit: nil, after_id: nil)
+        @all_calls += 1
+        return @snapshot.select { |item| item.scope == scope } unless limit
+
+        @pages.shift || []
+      end
+
+      def update(id:, record:)
+        @updated_ids << id
+        index = @snapshot.index { |item| item.id == id }
+        @snapshot[index] = record
+      end
+
+      def add(record) = raise NotImplementedError
+      def search(...) = raise NotImplementedError
+      def delete(id:) = raise NotImplementedError
+      def touch(id:, at: Time.now) = raise NotImplementedError
+    end
+
+    scenarios = [
+      [[2, 1], [2, 3]],
+      [[1, 3], []],
+      [[2, nil], [2, 1], [1, 3], [3, nil], []]
+    ]
+
+    scenarios.each do |page_ids|
+      snapshot = [1, 2, 3, 4].map { |id| record.call(id) }
+      nil_record = record.call(nil)
+      pages = page_ids.map do |ids|
+        ids.map { |id| id.nil? ? nil_record : snapshot.fetch(id - 1) }
+      end
+      adversarial_store = adversarial_store_class.new(snapshot, pages)
+
+      result = described_class.new(store: adversarial_store, embedder: embedder).call(
+        scope: "u:1", stale_only: false, batch_size: 2
+      )
+
+      expect(adversarial_store.updated_ids).to contain_exactly(1, 2, 3, 4)
+      expect(adversarial_store.updated_ids.uniq).to eq(adversarial_store.updated_ids)
+      expect(result[:processed]).to eq(4 + (page_ids.flatten.include?(nil) ? 1 : 0))
+      expect(adversarial_store.all_calls).to be <= 6
+    end
+  end
+
   it "only processes records in the requested scope" do
     add_record(content: "in_scope", metadata: {})
     add_record(content: "other_scope", scope: "u:2", metadata: {})
