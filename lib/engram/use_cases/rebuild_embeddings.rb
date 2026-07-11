@@ -1,7 +1,5 @@
 # frozen_string_literal: true
 
-require "set"
-
 module Engram
   module UseCases
     # Rebuild stored embeddings when the active embedder configuration changes.
