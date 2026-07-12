@@ -14,9 +14,14 @@ the resulting `main` commit.
    generator/migration, add/recall, and the configured pgvector and job adapters.
 5. Before the first release, configure RubyGems Trusted Publishing for this GitHub repository,
    workflow `.github/workflows/release.yml`, and environment `release`. Protect that GitHub
-   environment as appropriate. Do not add a long-lived RubyGems API-key secret.
+   environment with at least one required reviewer, and restrict deployment branches and tags
+   so only approved release tags can deploy. These are repository settings that maintainers must
+   configure; this document does not imply they are already enabled. Do not add a long-lived
+   RubyGems API-key secret.
 6. After all changes are merged and checks are green, tag the matching commit as `vX.Y.Z` and
-   push the tag. The release workflow rejects a tag that differs from `Engram::VERSION`.
+   push the tag. The release workflow rejects a tag that differs from `Engram::VERSION` or whose
+   tagged commit is not contained in `origin/main`. This containment check is enforced before
+   publishing; the tagged commit need not be the current tip of `main`.
 7. After publishing, install from RubyGems into a clean isolated `GEM_HOME`, change outside the
    source tree, `require "engram"`, and run a minimal add/recall smoke. Verify the published
    version and package contents on RubyGems.org.
