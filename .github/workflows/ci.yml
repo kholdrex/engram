@@ -71,3 +71,33 @@ jobs:
           ruby-version: "3.3"
           bundler-cache: true
       - run: bundle exec rspec --tag integration
+
+  package:
+    runs-on: ubuntu-latest
+    env:
+      BUNDLE_WITHOUT: integration
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+          bundler-cache: true
+      - name: Build and verify gem artifact
+        run: |
+          version="$(bundle exec ruby -Ilib -rengram/version -e 'print Engram::VERSION')"
+          bundle exec gem build engram.gemspec
+          artifact="engram-${version}.gem"
+          test -f "$artifact"
+          test "$(ruby -rrubygems/package -e 'print Gem::Package.new(ARGV.fetch(0)).spec.name' "$artifact")" = "engram"
+          test "$(ruby -rrubygems/package -e 'print Gem::Package.new(ARGV.fetch(0)).spec.version' "$artifact")" = "$version"
+          printf '%s\n' "$artifact" > /tmp/engram-artifact
+      - name: Install and smoke test as an external consumer
+        run: |
+          artifact="$GITHUB_WORKSPACE/$(cat /tmp/engram-artifact)"
+          export GEM_HOME="$RUNNER_TEMP/engram-gems"
+          export GEM_PATH="$GEM_HOME"
+          export PATH="$GEM_HOME/bin:$PATH"
+          gem install --no-document "$artifact"
+          consumer_dir="$(mktemp -d)"
+          cd "$consumer_dir"
+          env -u BUNDLE_GEMFILE ruby -rengram -e 'memory = Engram::Memory.new(scope: "smoke"); record = memory.add("package works", kind: :fact); abort "smoke failed" unless record && memory.recall("package works").include?(record)'
