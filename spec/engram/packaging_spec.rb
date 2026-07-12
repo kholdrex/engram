@@ -23,6 +23,12 @@ RSpec.describe "gem packaging" do
     expect(spec.runtime_dependencies).to be_empty
   end
 
+  it "ships only the documented top-level files alongside Ruby sources" do
+    top_level_files = spec.files.reject { |path| path.start_with?("lib/") }
+    expect(top_level_files).to contain_exactly("README.md", "LICENSE.txt", "CHANGELOG.md")
+    expect(spec.files).to all(satisfy { |path| File.file?(File.expand_path("../../#{path}", __dir__)) })
+  end
+
   it "declares useful gem metadata" do
     expect(spec.metadata).to include(
       "homepage_uri" => "https://github.com/kholdrex/engram",

@@ -91,7 +91,7 @@ Before the 1.0 release marker, freeze the public API by:
 
 1. Finalizing configuration and initializer keys in docs and examples.
 2. Writing upgrade notes for any remaining behavior-shifting defaults.
-3. Verifying migrations/rebuild flows for legacy rows remain deterministic and reversible.
+3. Verifying migrations/rebuild flows for legacy rows remain observable and recoverable.
 4. Keeping security and persistence-policy boundaries explicit in host-app guidance.
 
 Use `CHANGELOG.md` as the authoritative source for breaking/compatibility changes while still in pre-1.0.
@@ -406,6 +406,13 @@ bundle exec rake "engram:rebuild_embeddings[user:42]"
 By default, only stale rows are rewritten. Set `STALE_ONLY=false` to rebuild all rows in
 the scope, and `BATCH_SIZE=<n>` to tune write size.
 
+The rebuild has no dry-run mode and updates each row as it goes. It assumes the store exposes
+a stable, finite, scope-isolated traversal; malformed adapters that repeat forever cannot be
+made deterministic by the rebuild. Rows without IDs are counted and skipped. Choose a batch
+size that fits provider and database limits, take a backup first, and monitor provider usage,
+errors, and database load. The final summary reports processed, updated, skipped, and failed
+counts; failures also list record IDs and cause the rake task to exit unsuccessfully.
+
 ## Observability
 
 When ActiveSupport is loaded, Engram emits `ActiveSupport::Notifications` events for the
@@ -546,8 +553,9 @@ gem unpack engram-*.gem --target /tmp/engram-package-check
 - v0.1 (done): recall + inject foundation, adapters, Rails + RubyLLM integration.
 - v0.2 (done): extract and consolidate (ADD / UPDATE / FORGET), background jobs.
 - v0.3 (done): idempotent observation, importance/recency recall, forgetting and decay.
-- v0.4 (in progress): memory kinds, persistence policy, typed recall filters, safer injection, and release-readiness docs.
-- later: real-provider eval ergonomics, additional storage backends, observability hooks, and larger eval benchmarks.
+- v0.4 (done): memory kinds, persistence policy, typed recall filters, safer injection, and observability hooks.
+- v0.5 (in progress): embedding provenance and scoped embedding rebuild operations.
+- later: additional storage backends and larger real-provider eval benchmarks.
 
 ## License
 
