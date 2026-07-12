@@ -26,38 +26,48 @@ module Engram
           idempotency_key_present: !idempotency_key.nil?
         )
         Engram::Instrumentation.instrument("observe", payload) do
-          if already_processed?(idempotency_key)
+          claim = acquire_claim(scope, idempotency_key)
+          if idempotency_key && @processed_turns && !claim
             payload[:skipped] = true
             payload[:candidate_count] = 0
             payload[:decision_count] = 0
             next []
           end
 
-          candidates = extract(messages: messages, scope: scope)
-          payload[:candidate_count] = candidates.size
-          if candidates.empty?
-            mark_processed(idempotency_key)
-            payload[:decision_count] = 0
-            next []
-          end
+          begin
+            candidates = extract(messages: messages, scope: scope)
+            payload[:candidate_count] = candidates.size
+            if candidates.empty?
+              complete_claim(scope, idempotency_key, claim)
+              payload[:decision_count] = 0
+              next []
+            end
 
-          decisions = consolidate(candidates: candidates, scope: scope)
-          applied_decisions = decisions.filter_map { |decision| apply(decision, scope) }
-          payload[:decision_count] = applied_decisions.size
-          payload[:decision_actions] = applied_decisions.map { |decision| decision.action.to_s }
-          mark_processed(idempotency_key)
-          applied_decisions
+            decisions = consolidate(candidates: candidates, scope: scope)
+            applied_decisions = decisions.filter_map { |decision| apply(decision, scope) }
+            payload[:decision_count] = applied_decisions.size
+            payload[:decision_actions] = applied_decisions.map { |decision| decision.action.to_s }
+            complete_claim(scope, idempotency_key, claim)
+            applied_decisions
+          rescue
+            release_claim(scope, idempotency_key, claim)
+            raise
+          end
         end
       end
 
       private
 
-      def already_processed?(key)
-        !!(key && @processed_turns&.seen?(key))
+      def acquire_claim(scope, key)
+        @processed_turns.claim(scope: scope, key: key) if key && @processed_turns
       end
 
-      def mark_processed(key)
-        @processed_turns.record(key) if key && @processed_turns
+      def complete_claim(scope, key, claim)
+        @processed_turns.complete(scope: scope, key: key, claim: claim) if claim
+      end
+
+      def release_claim(scope, key, claim)
+        @processed_turns.release(scope: scope, key: key, claim: claim) if claim
       end
 
       def extract(messages:, scope:)

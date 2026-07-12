@@ -18,6 +18,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   for update, delete, and touch operations. Custom stores must adopt the new scoped signatures;
   `update` returns the updated record or raises `Engram::Error`, while delete and touch return an
   affected-row count.
+- **Breaking (pre-1.0):** the `ProcessedTurns` port migrated from the previous check/mark API
+  to `claim`, `complete`, `release`, and `completed?`; custom adapters must implement the new
+  claim lifecycle. A successful claim returns a truthy opaque token.
+- Observation idempotency now uses atomic, scope-aware claims with an in-progress lease and
+  completed state. `InMemoryProcessedTurns` is thread-safe and releases failures immediately.
+  Generic cache release is a no-op until lease expiry because ActiveSupport cache has no atomic
+  compare-and-delete; completion never deletes a possibly newer claim. Completed markers
+  suppress later calls only for their configured `ttl`. A failed completion write leaves the
+  lease to suppress work until expiry, after which already-applied work may replay. `lease_ttl`
+  should cover the longest observation while remaining much shorter than `ttl`, and
+  `Rails::CacheProcessedTurns` uses atomic `unless_exist` writes with separate claim and
+  completion keys. This coordinates concurrent work but does not make multi-decision memory
+  persistence and claim completion a crash-proof transaction. Lease expiry may permit overlap,
+  so claims do not guarantee ownership, fencing, or exactly-once execution.
 - Added API stability and migration posture documentation for pre-1.0 freeze planning, including public surface boundaries and legacy compatibility points.
 - Store search result validation now raises a clear `Engram::Error` when stored embedding
   metadata or vector dimensions conflict with the active embedder, while legacy records without

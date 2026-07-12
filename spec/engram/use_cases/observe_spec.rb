@@ -141,4 +141,61 @@ RSpec.describe Engram::UseCases::Observe do
     expect(store.all(scope: "u:1").size).to eq(1)
     expect(completion.calls.size).to eq(1) # extraction did not run again
   end
+
+  it "keeps direct-use idempotency keys scoped" do
+    completion = Engram::Adapters::FakeCompletion.new(responses: [extraction("One"), extraction("Two")])
+    processed = Engram::Adapters::InMemoryProcessedTurns.new
+    observe = described_class.new(store: store, extractor: extractor_for(completion),
+      consolidator: Engram::Consolidators::HeuristicConsolidator.new(store: store), processed_turns: processed)
+
+    observe.call(messages: ["one"], scope: "u:1", idempotency_key: "turn-1")
+    observe.call(messages: ["two"], scope: "u:2", idempotency_key: "turn-1")
+    expect(completion.calls.size).to eq(2)
+  end
+
+  it "releases the claim when observation raises so a retry proceeds" do
+    extractor = Object.new
+    calls = 0
+    extractor.define_singleton_method(:extract) do |messages:, scope:|
+      calls += 1
+      raise "boom" if calls == 1
+      []
+    end
+    processed = Engram::Adapters::InMemoryProcessedTurns.new
+    observe = described_class.new(store: store, extractor: extractor,
+      consolidator: Engram::Consolidators::HeuristicConsolidator.new(store: store), processed_turns: processed)
+
+    expect { observe.call(messages: ["x"], scope: "u:1", idempotency_key: "turn") }.to raise_error("boom")
+    expect(observe.call(messages: ["x"], scope: "u:1", idempotency_key: "turn")).to eq([])
+    expect(calls).to eq(2)
+  end
+
+  it "allows exactly one concurrent extraction for a scope and key" do
+    entered = Queue.new
+    release = Queue.new
+    extractor = Object.new
+    extractor.define_singleton_method(:extract) do |messages:, scope:|
+      entered << true
+      release.pop
+      []
+    end
+    observe = described_class.new(store: store, extractor: extractor,
+      consolidator: Engram::Consolidators::HeuristicConsolidator.new(store: store),
+      processed_turns: Engram::Adapters::InMemoryProcessedTurns.new)
+    ready = Queue.new
+    start = Queue.new
+    threads = 8.times.map do
+      Thread.new do
+        ready << true
+        start.pop
+        observe.call(messages: ["x"], scope: "u:1", idempotency_key: "turn")
+      end
+    end
+    8.times { ready.pop }
+    8.times { start << true }
+    entered.pop
+    release << true
+    threads.each(&:value)
+    expect(entered.size).to eq(0)
+  end
 end

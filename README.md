@@ -147,14 +147,22 @@ current_user.memory.observe_later([
 ```
 
 `observe_later` uses ActiveJob, so configure the queue adapter you already use in
-production (Sidekiq, Solid Queue, GoodJob, etc.). For idempotency across retries and
-processes, use the Rails cache-backed processed-turn store:
+production (Sidekiq, Solid Queue, GoodJob, etc.). To coordinate observation claims across
+retries and processes, use the Rails cache-backed processed-turn store with a shared cache
+whose `write(..., unless_exist: true)` operation is atomic (for example Redis or Solid Cache):
 
 ```ruby
 Engram.configure do |config|
-  config.processed_turns = Engram::Rails::CacheProcessedTurns.new
+  config.processed_turns = Engram::Rails::CacheProcessedTurns.new(lease_ttl: 5.minutes)
 end
 ```
+
+The adapter rejects backends that do not return a boolean result for `unless_exist`, but it
+cannot detect a backend that accepts the option without implementing it atomically. Rails'
+memory cache coordinates threads in one process only, and `NullStore` is not suitable.
+Completed suppression is bounded by `ttl` (24 hours by default). Set `lease_ttl` longer than
+the longest expected observation, but normally much shorter than `ttl`, so crashed work can
+be retried promptly without weakening the completed-turn suppression window.
 
 ## Postgres + pgvector setup
 
@@ -352,9 +360,24 @@ with the old `semantic` kind value.
 
 ## Tuning and maintenance
 
-Observation is idempotent per turn: observing the same messages twice does nothing the
-second time, so retries do not create duplicate memories or repeat LLM calls. In Rails,
-use a persistent processed-turn store so this also holds across job retries and processes.
+Observation uses a scope-and-turn claim before extraction. Concurrent calls for the same
+scope and turn are suppressed while the claim lease is live, and a completed marker
+suppresses later calls only until its configured `ttl` expires. The in-memory adapter releases
+failures immediately. Generic Rails cache release is deliberately a no-op until lease expiry
+because ActiveSupport cache has no atomic compare-and-delete. In Rails, use a shared cache
+with atomic `unless_exist` writes for cross-process coordination. Set `lease_ttl` longer than
+the longest expected observation but much shorter than the completed-marker `ttl`; after a
+worker crash (or an overlong observation), the lease expires so another worker can retry.
+
+Lease expiry can permit old and new workers to overlap; claims are not fencing tokens or an
+ownership guarantee. Successful work records completion but cannot safely delete a possibly
+newer cache claim. This is idempotency coordination, not crash-proof exactly-once persistence. An observation
+can apply multiple decisions, and the memory writes plus completed marker are not one
+transaction. A crash, cache outage, or lease expiry between those operations can permit a
+retry after some decisions were already written. Applications needing stronger guarantees
+must supply transactional persistence/outbox coordination appropriate to their store.
+If writing the completed marker fails after memory writes succeed, the current lease still
+suppresses retries until it expires; after expiry the turn may replay and repeat those writes.
 
 Recall is plain similarity search by default. You can blend in importance and recency:
 
