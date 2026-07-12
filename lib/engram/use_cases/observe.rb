@@ -84,7 +84,7 @@ module Engram
         when :add
           raise Engram::Error, "cannot move memory across scopes" unless decision.candidate.scope == scope
 
-          decision if persistence.add(decision.candidate)
+          decision if persistence.add(decision.candidate, scope: scope)
         when :update
           if decision.target_id && persistence.update(scope: scope, id: decision.target_id, record: decision.candidate)
             decision

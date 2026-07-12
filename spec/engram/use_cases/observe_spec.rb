@@ -93,6 +93,19 @@ RSpec.describe Engram::UseCases::Observe do
     expect(store.all(scope: "u:1")).to be_empty
   end
 
+  it "rejects an add when before_persist moves the prepared record outside the call scope" do
+    Engram.config.before_persist = ->(record) { record.with(scope: "u:2") }
+    completion = Engram::Adapters::FakeCompletion.new(responses: [extraction("User likes tea")])
+    consolidator = Engram::Consolidators::HeuristicConsolidator.new(store: store)
+
+    expect {
+      described_class.new(store: store, extractor: extractor_for(completion), consolidator: consolidator)
+        .call(messages: ["I like tea"], scope: "u:1")
+    }.to raise_error(Engram::Error, /across scopes/)
+    expect(store.all(scope: "u:1")).to be_empty
+    expect(store.all(scope: "u:2")).to be_empty
+  end
+
   it "applies the configured before_persist hook before storing observed memories" do
     Engram.config.before_persist = lambda do |record|
       record.with(content: record.content.gsub("billing@example.test", "[REDACTED]"))
