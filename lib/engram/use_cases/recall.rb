@@ -48,7 +48,7 @@ module Engram
           )
 
           results = (reranking? ? rerank(pool, embedding) : pool).first(limit)
-          touch(results) if @touch
+          touch(results, scope) if @touch
           payload[:result_count] = results.size
           payload[:candidate_count] = pool.size
           results
@@ -80,8 +80,8 @@ module Engram
         0.5**(age / @recency_halflife)
       end
 
-      def touch(records)
-        records.each { |record| @store.touch(id: record.id, at: Time.now) if record.id }
+      def touch(records, scope)
+        records.each { |record| @store.touch(scope: scope, id: record.id, at: Time.now) if record.id }
       end
     end
   end

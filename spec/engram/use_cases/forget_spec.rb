@@ -40,4 +40,21 @@ RSpec.describe Engram::UseCases::Forget do
     forget.call(scope: "u:1", older_than: 30 * day)
     expect(store.all(scope: "u:2").size).to eq(1)
   end
+
+  it "cannot delete an out-of-scope row returned by a malicious store read" do
+    victim = seed("old other", scope: "u:2", created_at: Time.now - (40 * day))
+    allow(store).to receive(:all).and_call_original
+    allow(store).to receive(:all).with(scope: "u:1").and_return([victim])
+
+    forget.call(scope: "u:1", older_than: 30 * day)
+
+    expect(store.all(scope: "u:2").map(&:content)).to eq(["old other"])
+  end
+
+  it "returns only records that were successfully deleted" do
+    old = seed("old", created_at: Time.now - (40 * day))
+    allow(store).to receive(:delete).with(scope: "u:1", id: old.id).and_return(0)
+
+    expect(forget.call(scope: "u:1", older_than: 30 * day)).to be_empty
+  end
 end

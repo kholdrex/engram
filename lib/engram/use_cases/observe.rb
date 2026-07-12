@@ -42,7 +42,7 @@ module Engram
           end
 
           decisions = consolidate(candidates: candidates, scope: scope)
-          applied_decisions = decisions.filter_map { |decision| apply(decision) }
+          applied_decisions = decisions.filter_map { |decision| apply(decision, scope) }
           payload[:decision_count] = applied_decisions.size
           payload[:decision_actions] = applied_decisions.map { |decision| decision.action.to_s }
           mark_processed(idempotency_key)
@@ -79,16 +79,21 @@ module Engram
         end
       end
 
-      def apply(decision)
+      def apply(decision, scope)
         case decision.action
         when :add
-          decision if persistence.add(decision.candidate)
+          raise Engram::Error, "cannot move memory across scopes" unless decision.candidate.scope == scope
+
+          decision if persistence.add(decision.candidate, scope: scope)
         when :update
-          if decision.target_id && persistence.update(id: decision.target_id, record: decision.candidate)
+          if decision.target_id && persistence.update(scope: scope, id: decision.target_id, record: decision.candidate)
             decision
           end
         when :forget
-          decision if decision.target_id && @store.delete(id: decision.target_id)
+          if decision.target_id
+            deleted = @store.delete(scope: scope, id: decision.target_id)
+            decision if deleted && deleted != 0
+          end
         when :noop
           nil
         end

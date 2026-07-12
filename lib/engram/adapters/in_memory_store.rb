@@ -44,21 +44,28 @@ module Engram
         records
       end
 
-      def update(id:, record:)
-        raise Engram::Error, "no memory with id #{id.inspect}" unless @records.key?(id)
+      def update(scope:, id:, record:)
+        existing = @records[id]
+        raise Engram::Error, "no memory with id #{id.inspect} in scope #{scope.inspect}" unless existing&.scope == scope
+        raise Engram::Error, "cannot move memory across scopes" unless record.scope == scope
 
         record.id = id
         @records[id] = record
       end
 
-      def delete(id:)
+      def delete(scope:, id:)
+        return 0 unless @records[id]&.scope == scope
+
         @records.delete(id)
+        1
       end
 
-      def touch(id:, at: Time.now)
+      def touch(scope:, id:, at: Time.now)
         record = @records[id]
-        record.last_accessed_at = at if record
-        record
+        return 0 unless record&.scope == scope
+
+        record.last_accessed_at = at
+        1
       end
 
       def clear

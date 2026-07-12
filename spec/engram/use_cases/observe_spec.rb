@@ -38,6 +38,39 @@ RSpec.describe Engram::UseCases::Observe do
     expect(store.all(scope: "u:1").map(&:content)).to eq(["User is on Pro"])
   end
 
+  it "cannot apply malicious cross-scope update or forget decisions" do
+    victim = store.add(Engram::Record.new(content: "private", scope: "u:2", embedding: [0.0]))
+    candidate = Engram::Record.new(content: "attack", scope: "u:1", embedding: [0.0])
+    extractor = double(extract: [candidate])
+
+    update = double(reconcile_all: [Engram::Decision.new(action: :update,
+      candidate: candidate, target_id: victim.id)])
+    expect {
+      described_class.new(store: store, extractor: extractor, consolidator: update, embedder: embedder)
+        .call(messages: ["attack"], scope: "u:1")
+    }.to raise_error(Engram::Error)
+
+    forget = double(reconcile_all: [Engram::Decision.new(action: :forget,
+      candidate: candidate, target_id: victim.id)])
+    decisions = described_class.new(store: store, extractor: extractor, consolidator: forget, embedder: embedder)
+      .call(messages: ["attack"], scope: "u:1")
+
+    expect(decisions).to be_empty
+    expect(store.all(scope: "u:2").map(&:content)).to eq(["private"])
+  end
+
+  it "rejects an add decision whose candidate is outside the call scope" do
+    candidate = Engram::Record.new(content: "private", scope: "u:2", embedding: [0.0])
+    extractor = double(extract: [candidate])
+    consolidator = double(reconcile_all: [Engram::Decision.new(action: :add, candidate: candidate)])
+
+    expect {
+      described_class.new(store: store, extractor: extractor, consolidator: consolidator, embedder: embedder)
+        .call(messages: ["attack"], scope: "u:1")
+    }.to raise_error(Engram::Error, /across scopes/)
+    expect(store.all(scope: "u:2")).to be_empty
+  end
+
   it "does nothing when nothing is extracted" do
     completion = Engram::Adapters::FakeCompletion.new(responses: [{"facts" => []}])
     consolidator = Engram::Consolidators::HeuristicConsolidator.new(store: store)
@@ -58,6 +91,19 @@ RSpec.describe Engram::UseCases::Observe do
 
     expect(decisions).to eq([])
     expect(store.all(scope: "u:1")).to be_empty
+  end
+
+  it "rejects an add when before_persist moves the prepared record outside the call scope" do
+    Engram.config.before_persist = ->(record) { record.with(scope: "u:2") }
+    completion = Engram::Adapters::FakeCompletion.new(responses: [extraction("User likes tea")])
+    consolidator = Engram::Consolidators::HeuristicConsolidator.new(store: store)
+
+    expect {
+      described_class.new(store: store, extractor: extractor_for(completion), consolidator: consolidator)
+        .call(messages: ["I like tea"], scope: "u:1")
+    }.to raise_error(Engram::Error, /across scopes/)
+    expect(store.all(scope: "u:1")).to be_empty
+    expect(store.all(scope: "u:2")).to be_empty
   end
 
   it "applies the configured before_persist hook before storing observed memories" do

@@ -135,5 +135,15 @@ RSpec.describe Engram::UseCases::Recall do
         .call("q", scope: "u:1", limit: 1)
       expect(store.all(scope: "u:1").first.last_accessed_at).not_to be_nil
     end
+
+    it "cannot touch an out-of-scope row returned by a malicious search" do
+      victim = seed("other", scope: "u:2")
+      allow(store).to receive(:search).and_return([victim])
+
+      described_class.new(store: store, embedder: fixed_embedder, touch: true)
+        .call("q", scope: "u:1", limit: 1)
+
+      expect(store.all(scope: "u:2").first.last_accessed_at).to be_nil
+    end
   end
 end

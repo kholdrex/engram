@@ -77,7 +77,9 @@ module Engram
             begin
               rebuilt = record.with(embedding: @embedder.embed(record.content))
               rebuilt = EmbeddingMetadata.attach(rebuilt, embedder: @embedder)
-              @store.update(id: record.id, record: rebuilt)
+              updated = @store.update(scope: scope, id: record.id, record: rebuilt)
+              raise Engram::Error, "memory update was not applied" unless updated && updated != 0
+
               counts[:updated] += 1
             rescue => error
               counts[:failed] += 1

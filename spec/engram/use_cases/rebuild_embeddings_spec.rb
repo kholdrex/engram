@@ -17,6 +17,18 @@ RSpec.describe Engram::UseCases::RebuildEmbeddings do
     store.add(record)
   end
 
+  it "reports a scoped update rejected by the store as failed" do
+    record = add_record(content: "stale", metadata: {})
+    allow(store).to receive(:update).with(scope: "u:1", id: record.id, record: anything).and_return(nil)
+
+    result = rebuild.call(scope: "u:1", stale_only: false)
+
+    expect(result).to include(updated: 0, failed: 1, failed_ids: [record.id])
+    expect(result[:failed_errors][record.id]).to eq(
+      class: "Engram::Error", message: "memory update was not applied"
+    )
+  end
+
   it "updates stale records by default" do
     stale = Engram::Record.new(content: "hello", scope: "u:1", embedding: embedder.embed("hello"))
     fresh = Engram::Record.new(content: "world", scope: "u:1", embedding: embedder.embed("world"), metadata: {})
@@ -86,8 +98,8 @@ RSpec.describe Engram::UseCases::RebuildEmbeddings do
 
       def add(record) = raise NotImplementedError
       def search(...) = raise NotImplementedError
-      def delete(id:) = raise NotImplementedError
-      def touch(id:, at: Time.now) = raise NotImplementedError
+      def delete(scope:, id:) = raise NotImplementedError
+      def touch(scope:, id:, at: Time.now) = raise NotImplementedError
 
       def all(scope:, limit: nil, offset: 0, after_id: nil)
         @all_calls += 1
@@ -98,7 +110,7 @@ RSpec.describe Engram::UseCases::RebuildEmbeddings do
         records
       end
 
-      def update(id:, record:)
+      def update(scope:, id:, record:)
         index = @records.index { |existing| existing.id == id }
         @records[index] = record
         record
@@ -140,15 +152,15 @@ RSpec.describe Engram::UseCases::RebuildEmbeddings do
         @records.select { |record| record.scope == scope }
       end
 
-      def update(id:, record:)
+      def update(scope:, id:, record:)
         index = @records.index { |existing| existing.id == id }
         @records[index] = record
         record
       end
 
-      def delete(id:) = raise NotImplementedError
+      def delete(scope:, id:) = raise NotImplementedError
 
-      def touch(id:, at: Time.now) = raise NotImplementedError
+      def touch(scope:, id:, at: Time.now) = raise NotImplementedError
     end
 
     legacy_store = legacy_store_class.new([
@@ -190,15 +202,15 @@ RSpec.describe Engram::UseCases::RebuildEmbeddings do
         @records.select { |record| record.scope == scope }
       end
 
-      def update(id:, record:)
+      def update(scope:, id:, record:)
         index = @records.index { |existing| existing.id == id }
         @records[index] = record
         record
       end
 
-      def delete(id:) = raise NotImplementedError
+      def delete(scope:, id:) = raise NotImplementedError
 
-      def touch(id:, at: Time.now) = raise NotImplementedError
+      def touch(scope:, id:, at: Time.now) = raise NotImplementedError
     end
 
     permissive_store = permissive_store_class.new([
@@ -242,15 +254,15 @@ RSpec.describe Engram::UseCases::RebuildEmbeddings do
         @records.select { |record| record.scope == scope }.take(limit || @records.length)
       end
 
-      def update(id:, record:)
+      def update(scope:, id:, record:)
         index = @records.index { |existing| existing.id == id }
         @records[index] = record
         record
       end
 
-      def delete(id:) = raise NotImplementedError
+      def delete(scope:, id:) = raise NotImplementedError
 
-      def touch(id:, at: Time.now) = raise NotImplementedError
+      def touch(scope:, id:, at: Time.now) = raise NotImplementedError
     end
 
     paged_store = paged_store_class.new([
@@ -290,8 +302,8 @@ RSpec.describe Engram::UseCases::RebuildEmbeddings do
 
       def add(record) = raise NotImplementedError
       def search(...) = raise NotImplementedError
-      def delete(id:) = raise NotImplementedError
-      def touch(id:, at: Time.now) = raise NotImplementedError
+      def delete(scope:, id:) = raise NotImplementedError
+      def touch(scope:, id:, at: Time.now) = raise NotImplementedError
 
       def all(scope:, limit: nil, offset: 0, after_id: nil)
         records = @records.select { |record| record.scope == scope }
@@ -301,7 +313,7 @@ RSpec.describe Engram::UseCases::RebuildEmbeddings do
         records
       end
 
-      def update(id:, record:)
+      def update(scope:, id:, record:)
         index = @records.index { |existing| existing.id == id }
         @records[index] = record
         record
@@ -335,8 +347,8 @@ RSpec.describe Engram::UseCases::RebuildEmbeddings do
 
       def add(record) = raise NotImplementedError
       def search(...) = raise NotImplementedError
-      def delete(id:) = raise NotImplementedError
-      def touch(id:, at: Time.now) = raise NotImplementedError
+      def delete(scope:, id:) = raise NotImplementedError
+      def touch(scope:, id:, at: Time.now) = raise NotImplementedError
 
       def all(scope:, limit: nil, offset: 0, after_id: nil)
         records = @records.select { |record| record.scope == scope }
@@ -346,7 +358,7 @@ RSpec.describe Engram::UseCases::RebuildEmbeddings do
         records
       end
 
-      def update(id:, record:)
+      def update(scope:, id:, record:)
         index = @records.index { |existing| existing.id == id }
         @records[index] = record
         record
@@ -380,8 +392,8 @@ RSpec.describe Engram::UseCases::RebuildEmbeddings do
 
       def add(record) = raise NotImplementedError
       def search(...) = raise NotImplementedError
-      def delete(id:) = raise NotImplementedError
-      def touch(id:, at: Time.now) = raise NotImplementedError
+      def delete(scope:, id:) = raise NotImplementedError
+      def touch(scope:, id:, at: Time.now) = raise NotImplementedError
 
       def all(scope:, limit: nil, after_id: nil)
         records = @records.select { |record| record.scope == scope }
@@ -391,7 +403,7 @@ RSpec.describe Engram::UseCases::RebuildEmbeddings do
         ([records.first] + tail).take(limit || records.length)
       end
 
-      def update(id:, record:)
+      def update(scope:, id:, record:)
         index = @records.index { |existing| existing.id == id }
         @records[index] = record
         record
@@ -426,8 +438,8 @@ RSpec.describe Engram::UseCases::RebuildEmbeddings do
 
       def add(record) = raise NotImplementedError
       def search(...) = raise NotImplementedError
-      def delete(id:) = raise NotImplementedError
-      def touch(id:, at: Time.now) = raise NotImplementedError
+      def delete(scope:, id:) = raise NotImplementedError
+      def touch(scope:, id:, at: Time.now) = raise NotImplementedError
 
       def all(scope:, limit: nil, after_id: nil)
         records = @records.select { |record| record.scope == scope }
@@ -437,7 +449,7 @@ RSpec.describe Engram::UseCases::RebuildEmbeddings do
         duplicated_page.take(limit || duplicated_page.length)
       end
 
-      def update(id:, record:)
+      def update(scope:, id:, record:)
         index = @records.index { |existing| existing.id == id }
         @records[index] = record
         record
@@ -493,7 +505,7 @@ RSpec.describe Engram::UseCases::RebuildEmbeddings do
         @pages.shift || []
       end
 
-      def update(id:, record:)
+      def update(scope:, id:, record:)
         @updated_ids << id
         index = @snapshot.index { |item| item.id == id }
         @snapshot[index] = record
@@ -501,8 +513,8 @@ RSpec.describe Engram::UseCases::RebuildEmbeddings do
 
       def add(record) = raise NotImplementedError
       def search(...) = raise NotImplementedError
-      def delete(id:) = raise NotImplementedError
-      def touch(id:, at: Time.now) = raise NotImplementedError
+      def delete(scope:, id:) = raise NotImplementedError
+      def touch(scope:, id:, at: Time.now) = raise NotImplementedError
     end
 
     scenarios = [

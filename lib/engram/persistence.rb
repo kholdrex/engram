@@ -11,14 +11,17 @@ module Engram
       @persistence_policy = persistence_policy
     end
 
-    def add(record)
+    def add(record, scope: record.scope)
       record = prepare(record)
+      if record && record.scope != scope
+        raise Engram::Error, "cannot move memory across scopes"
+      end
       @store.add(record) if record
     end
 
-    def update(id:, record:)
+    def update(scope:, id:, record:)
       record = prepare(record)
-      @store.update(id: id, record: record) if record
+      @store.update(scope: scope, id: id, record: record) if record
     end
 
     private
