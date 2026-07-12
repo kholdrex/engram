@@ -26,18 +26,22 @@ module Engram
       end
 
       # Replace the content/embedding of an existing memory. Used by consolidation
-      # (UPDATE). Returns the updated Record.
-      def update(id:, record:)
+      # (UPDATE). Returns the updated Record. Raises Engram::Error when the scoped
+      # record does not exist or the replacement would move it to another scope.
+      def update(scope:, id:, record:)
         raise NotImplementedError, "#{self.class} must implement #update"
       end
 
-      # Remove a memory by id. Used by consolidation (FORGET).
-      def delete(id:)
+      # Remove a memory by id. Used by consolidation (FORGET). Returns the number
+      # of affected rows: 1 when deleted, 0 when the scoped record does not exist.
+      def delete(scope:, id:)
         raise NotImplementedError, "#{self.class} must implement #delete"
       end
 
       # Update the last-accessed timestamp of a memory. Used by recency-aware recall.
-      def touch(id:, at: Time.now)
+      # Returns the number of affected rows: 1 when touched, 0 when the scoped record
+      # does not exist.
+      def touch(scope:, id:, at: Time.now)
         raise NotImplementedError, "#{self.class} must implement #touch"
       end
     end

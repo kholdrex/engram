@@ -49,24 +49,30 @@ module Engram
         query.map { |row| to_record(row) }
       end
 
-      def update(id:, record:)
-        row = model.find(id)
-        row.update!(
-          content: record.content,
-          kind: record.kind.to_s,
-          importance: record.importance,
-          metadata: record.metadata,
-          embedding: record.embedding
-        )
-        to_record(row)
+      def update(scope:, id:, record:)
+        raise Engram::Error, "cannot move memory across scopes" unless record.scope == scope
+
+        model.transaction do
+          row = model.lock.find_by!(id: id, scope: scope)
+          row.update!(
+            content: record.content,
+            kind: record.kind.to_s,
+            importance: record.importance,
+            metadata: record.metadata,
+            embedding: record.embedding
+          )
+          to_record(row)
+        end
+      rescue ActiveRecord::RecordNotFound
+        raise Engram::Error, "no memory with id #{id.inspect} in scope #{scope.inspect}"
       end
 
-      def delete(id:)
-        model.where(id: id).delete_all
+      def delete(scope:, id:)
+        model.where(id: id, scope: scope).delete_all
       end
 
-      def touch(id:, at: Time.now)
-        model.where(id: id).update_all(last_accessed_at: at)
+      def touch(scope:, id:, at: Time.now)
+        model.where(id: id, scope: scope).update_all(last_accessed_at: at)
       end
 
       private

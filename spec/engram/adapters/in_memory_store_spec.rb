@@ -141,7 +141,10 @@ RSpec.describe Engram::Adapters::InMemoryStore do
 
   it "updates an existing record by id" do
     r = store.add(rec("old", scope: "u:1", embedding: [1.0, 0.0]))
-    store.update(id: r.id, record: rec("new", scope: "u:1", embedding: [0.0, 1.0]))
+    updated = store.update(scope: "u:1", id: r.id, record: rec("new", scope: "u:1", embedding: [0.0, 1.0]))
+
+    expect(updated).to be_a(Engram::Record)
+    expect(updated.content).to eq("new")
     expect(store.all(scope: "u:1").map(&:content)).to eq(["new"])
   end
 
@@ -159,19 +162,43 @@ RSpec.describe Engram::Adapters::InMemoryStore do
 
   it "deletes a record by id" do
     r = store.add(rec("x", scope: "u:1", embedding: [1.0, 0.0]))
-    store.delete(id: r.id)
+    expect(store.delete(scope: "u:1", id: r.id)).to eq(1)
+    expect(store.delete(scope: "u:1", id: r.id)).to eq(0)
     expect(store.all(scope: "u:1")).to be_empty
   end
 
   it "raises when updating a missing id" do
-    expect { store.update(id: 999, record: rec("x", scope: "u:1", embedding: [1.0, 0.0])) }
+    expect { store.update(scope: "u:1", id: 999, record: rec("x", scope: "u:1", embedding: [1.0, 0.0])) }
       .to raise_error(Engram::Error)
   end
 
   it "touches last_accessed_at by id" do
     r = store.add(rec("x", scope: "u:1", embedding: [1.0, 0.0]))
     expect(r.last_accessed_at).to be_nil
-    store.touch(id: r.id)
+    expect(store.touch(scope: "u:1", id: r.id)).to eq(1)
     expect(store.all(scope: "u:1").first.last_accessed_at).not_to be_nil
+    expect(store.touch(scope: "u:1", id: 999)).to eq(0)
+  end
+
+  it "does not mutate a record through another scope" do
+    r = store.add(rec("secret", scope: "u:2", embedding: [1.0, 0.0]))
+
+    expect { store.update(scope: "u:1", id: r.id, record: rec("stolen", scope: "u:1", embedding: [0.0, 1.0])) }
+      .to raise_error(Engram::Error)
+    expect(store.delete(scope: "u:1", id: r.id)).to eq(0)
+    expect(store.touch(scope: "u:1", id: r.id, at: Time.at(0))).to eq(0)
+
+    record = store.all(scope: "u:2").first
+    expect(record.content).to eq("secret")
+    expect(record.last_accessed_at).to be_nil
+  end
+
+  it "rejects moving a record to another scope during update" do
+    r = store.add(rec("secret", scope: "u:1", embedding: [1.0, 0.0]))
+
+    expect { store.update(scope: "u:1", id: r.id, record: rec("moved", scope: "u:2", embedding: [0.0, 1.0])) }
+      .to raise_error(Engram::Error, /scope/)
+    expect(store.all(scope: "u:1").map(&:content)).to eq(["secret"])
+    expect(store.all(scope: "u:2")).to be_empty
   end
 end

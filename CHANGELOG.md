@@ -14,6 +14,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   forced full-scope rebuild mode for recovery after provider/model changes.
 
 ### Changed
+- `MemoryStore` mutations now require an explicit `scope:` and enforce the `(scope, id)` boundary
+  for update, delete, and touch operations. Custom stores must adopt the new scoped signatures;
+  `update` returns the updated record or raises `Engram::Error`, while delete and touch return an
+  affected-row count.
 - Added API stability and migration posture documentation for pre-1.0 freeze planning, including public surface boundaries and legacy compatibility points.
 - Store search result validation now raises a clear `Engram::Error` when stored embedding
   metadata or vector dimensions conflict with the active embedder, while legacy records without

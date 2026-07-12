@@ -178,8 +178,11 @@ if deps_available
 
     it "updates an existing record by id" do
       stored = store.add(rec("plan is Free", embedding: [1.0, 0.0, 0.0]))
-      store.update(id: stored.id, record: rec("plan is Pro", embedding: [0.0, 0.0, 1.0]))
+      updated = store.update(scope: "u:1", id: stored.id,
+        record: rec("plan is Pro", embedding: [0.0, 0.0, 1.0]))
 
+      expect(updated).to be_a(Engram::Record)
+      expect(updated.content).to eq("plan is Pro")
       expect(store.all(scope: "u:1").map(&:content)).to eq(["plan is Pro"])
     end
 
@@ -197,8 +200,35 @@ if deps_available
 
     it "deletes a record by id" do
       stored = store.add(rec("temp", embedding: [1.0, 0.0, 0.0]))
-      store.delete(id: stored.id)
+      expect(store.delete(scope: "u:1", id: stored.id)).to eq(1)
+      expect(store.delete(scope: "u:1", id: stored.id)).to eq(0)
       expect(store.all(scope: "u:1")).to be_empty
+    end
+
+    it "does not mutate records through another scope or move them across scopes" do
+      stored = store.add(rec("secret", scope: "u:2", embedding: [1.0, 0.0, 0.0]))
+
+      expect {
+        store.update(scope: "u:1", id: stored.id,
+          record: rec("stolen", scope: "u:1", embedding: [0.0, 1.0, 0.0]))
+      }.to raise_error(Engram::Error)
+      expect(store.delete(scope: "u:1", id: stored.id)).to eq(0)
+      expect(store.touch(scope: "u:1", id: stored.id, at: Time.at(0))).to eq(0)
+      expect {
+        store.update(scope: "u:2", id: stored.id,
+          record: rec("moved", scope: "u:1", embedding: [0.0, 1.0, 0.0]))
+      }.to raise_error(Engram::Error, /scope/)
+
+      record = store.all(scope: "u:2").first
+      expect(record.content).to eq("secret")
+      expect(record.last_accessed_at).to be_nil
+    end
+
+    it "returns affected-row counts when touching records" do
+      stored = store.add(rec("temp", embedding: [1.0, 0.0, 0.0]))
+
+      expect(store.touch(scope: "u:1", id: stored.id, at: Time.at(0))).to eq(1)
+      expect(store.touch(scope: "u:1", id: -1, at: Time.at(0))).to eq(0)
     end
   end
 end

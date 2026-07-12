@@ -20,8 +20,12 @@ module Engram
           timestamp && timestamp < cutoff && record.importance.to_f < min_importance
         end
 
-        stale.each { |record| @store.delete(id: record.id) if record.id }
-        stale
+        stale.select do |record|
+          next false unless record.id
+
+          deleted = @store.delete(scope: scope, id: record.id)
+          deleted && deleted != 0
+        end
       end
     end
   end
