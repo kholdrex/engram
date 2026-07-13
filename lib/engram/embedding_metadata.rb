@@ -58,7 +58,8 @@ module Engram
       end
 
       reserved = reserved_values.reduce({}) { |merged, reserved_value| merged.merge(stringify_keys(reserved_value)) }
-      unexpected_reserved_keys = reserved.keys - [EMBEDDING_KEY]
+      # Other Engram-owned schemas (such as provenance) share this namespace.
+      unexpected_reserved_keys = reserved.keys - [EMBEDDING_KEY, "provenance"]
       unless unexpected_reserved_keys.empty?
         raise Engram::Error,
           "metadata key #{RESERVED_KEY.inspect} is reserved for Engram embedding metadata"
