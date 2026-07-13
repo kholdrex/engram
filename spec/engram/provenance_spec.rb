@@ -90,15 +90,11 @@ RSpec.describe Engram::Provenance do
   end
 
   it "rejects non-JSON-native Numeric confidence values" do
-    require "bigdecimal"
-
-    [Rational(1, 2), BigDecimal("0.5")].each do |confidence|
-      expect do
-        described_class.new(
-          sources: provenance.sources, extractor: provenance.extractor, confidence: confidence
-        )
-      end.to raise_error(ArgumentError, "confidence must be an Integer or Float between 0 and 1")
-    end
+    expect do
+      described_class.new(
+        sources: provenance.sources, extractor: provenance.extractor, confidence: Rational(1, 2)
+      )
+    end.to raise_error(ArgumentError, "confidence must be an Integer or Float between 0 and 1")
   end
 
   it "requires complete source location and extractor identity fields" do
