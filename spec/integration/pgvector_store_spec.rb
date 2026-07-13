@@ -83,6 +83,31 @@ if deps_available
       expect(Engram::MemoryRecord.count).to eq(1)
     end
 
+    it "round-trips versioned provenance metadata" do
+      provenance = Engram::Provenance.new(
+        sources: [
+          Engram::Provenance::Source.new(
+            source_id: "conversation:42",
+            source_type: "conversation",
+            message_index: 1,
+            role: "user",
+            spans: [Engram::Provenance::Span.new(start_offset: 0, end_offset: 4)],
+            alignment: :exact
+          )
+        ],
+        extractor: Engram::Provenance::Extractor.new(name: "test-extractor", model: "test-model"),
+        confidence: 0.9
+      )
+      record_metadata = Engram::Provenance.attach({"host" => "value"}, provenance)
+
+      stored = store.add(rec("tea", embedding: [1.0, 0.0, 0.0], metadata: record_metadata))
+      loaded = store.all(scope: "u:1").first
+
+      expect(Engram::Provenance.extract(stored.metadata)).to eq(provenance)
+      expect(Engram::Provenance.extract(loaded.metadata)).to eq(provenance)
+      expect(loaded.metadata["host"]).to eq("value")
+    end
+
     it "returns nearest neighbours first, scoped to the owner" do
       store.add(rec("near", embedding: [1.0, 0.0, 0.0]))
       store.add(rec("far", embedding: [0.0, 1.0, 0.0]))
