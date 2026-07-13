@@ -186,7 +186,8 @@ module Engram
         reserved_values << metadata[RESERVED_KEY] if metadata.key?(RESERVED_KEY)
         reserved_values << metadata[:_engram] if metadata.key?(:_engram)
         return nil if reserved_values.empty?
-        return nil unless reserved_values.all? { |value| value.is_a?(Hash) }
+        reserved_values.select! { |value| value.is_a?(Hash) }
+        return nil if reserved_values.empty?
 
         reserved = reserved_values.reduce({}) do |merged, value|
           Engram::ReservedMetadata.merge(merged, Engram::ReservedMetadata.normalize(value))

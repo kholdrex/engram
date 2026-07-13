@@ -259,7 +259,24 @@ RSpec.describe Engram::Provenance do
 
   it "distinguishes absent provenance from valid provenance during persistence parsing" do
     expect(described_class.extract_for_persistence({"host" => true})).to be_nil
+    expect(described_class.extract_for_persistence({"_engram" => "legacy user data"})).to be_nil
     expect(described_class.extract_for_persistence(described_class.attach({}, provenance))).to eq(provenance)
+  end
+
+  it "does not let scalar reserved metadata mask strict provenance validation in either key style" do
+    future_with_symbol_scalar = {
+      "_engram" => {"provenance" => provenance.to_h.merge("version" => 99)},
+      :_engram => "legacy user data"
+    }
+    malformed_with_string_scalar = {
+      "_engram" => "legacy user data",
+      :_engram => {provenance: provenance.to_h.merge("sources" => {})}
+    }
+
+    expect { described_class.extract_for_persistence(future_with_symbol_scalar) }
+      .to raise_error(Engram::Error, /unsupported provenance version 99/)
+    expect { described_class.extract_for_persistence(malformed_with_string_scalar) }
+      .to raise_error(Engram::Error, /malformed provenance/)
   end
 
   it "reports whether any source is structurally marked ungrounded" do
