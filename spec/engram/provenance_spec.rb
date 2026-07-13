@@ -137,6 +137,55 @@ RSpec.describe Engram::Provenance do
     expect(described_class.extract(metadata)).to eq(provenance)
   end
 
+  it "preserves unrelated metadata keys and nested values exactly" do
+    nested = {feature_flag: {"mode" => :strict}}
+    metadata = {:tenant => nested, "tenant" => "string tenant"}
+
+    attached = described_class.attach(metadata, provenance)
+
+    expect(attached[:tenant]).to equal(nested)
+    expect(attached).to include(:tenant => nested, "tenant" => "string tenant")
+    expect(metadata).to eq(:tenant => nested, "tenant" => "string tenant")
+  end
+
+  it "merges symbol and string reserved namespaces without losing embedding metadata" do
+    metadata = {
+      :_engram => {embedding: {adapter: "symbol-adapter", dimensions: 3}},
+      "_engram" => {"other_schema" => {enabled: true}}
+    }
+
+    attached = described_class.attach(metadata, provenance)
+
+    expect(attached).not_to have_key(:_engram)
+    expect(attached.dig("_engram", "embedding")).to eq(
+      "adapter" => "symbol-adapter", "dimensions" => 3
+    )
+    expect(attached.dig("_engram", "other_schema")).to eq("enabled" => true)
+    expect(attached.dig("_engram", "provenance")).to eq(provenance.to_h)
+  end
+
+  it "replaces provenance across reserved key styles while retaining sibling schemas" do
+    metadata = {
+      :_engram => {provenance: {version: 0}, embedding: {dimensions: 3}},
+      "_engram" => {"provenance" => {"version" => 99}}
+    }
+
+    attached = described_class.attach(metadata, provenance)
+
+    expect(attached.dig("_engram", "provenance")).to eq(provenance.to_h)
+    expect(attached.dig("_engram", "embedding")).to eq("dimensions" => 3)
+  end
+
+  it "rejects conflicting coexisting reserved metadata rather than discarding either value" do
+    metadata = {
+      :_engram => {embedding: {dimensions: 3}},
+      "_engram" => {"embedding" => {"dimensions" => 4}}
+    }
+
+    expect { described_class.attach(metadata, provenance) }
+      .to raise_error(Engram::Error, /conflicting reserved metadata.*embedding/)
+  end
+
   it "leaves legacy records and plain Record custom extractor results readable" do
     legacy = Engram::Record.new(
       content: "User likes tea", scope: "user:1", metadata: {"custom" => true}

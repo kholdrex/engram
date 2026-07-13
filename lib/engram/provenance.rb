@@ -162,13 +162,18 @@ module Engram
       def attach(metadata, provenance)
         raise ArgumentError, "provenance must be a Provenance value" unless provenance.is_a?(self)
 
-        metadata = deep_stringify(metadata || {})
-        reserved = metadata[RESERVED_KEY]
-        unless reserved.nil? || reserved.is_a?(Hash)
+        metadata = (metadata || {}).dup
+        reserved_values = [metadata.delete(RESERVED_KEY), metadata.delete(:_engram)].compact
+        unless reserved_values.all? { |reserved| reserved.is_a?(Hash) }
           raise Engram::Error, "metadata key #{RESERVED_KEY.inspect} is reserved for Engram metadata"
         end
 
-        metadata.merge(RESERVED_KEY => (reserved || {}).merge(METADATA_KEY => provenance.to_h))
+        reserved = reserved_values.reduce({}) do |merged, value|
+          # Attaching intentionally replaces prior provenance, regardless of key style.
+          siblings = value.reject { |key, _nested| key.to_s == METADATA_KEY }
+          merge_reserved(merged, normalize_reserved(siblings))
+        end
+        metadata.merge(RESERVED_KEY => reserved.merge(METADATA_KEY => provenance.to_h))
       end
 
       def extract(metadata)
@@ -211,6 +216,40 @@ module Engram
 
       def symbolize_extractor(data)
         {name: data["name"], provider: data["provider"], model: data["model"]}
+      end
+
+      def normalize_reserved(value, path = [])
+        return value.map { |nested| normalize_reserved(nested, path) } if value.is_a?(Array)
+        return value unless value.is_a?(Hash)
+
+        value.each_with_object({}) do |(key, nested), normalized|
+          string_key = key.to_s
+          normalized_value = normalize_reserved(nested, path + [string_key])
+          normalized[string_key] = if normalized.key?(string_key)
+            merge_reserved_value(
+              normalized[string_key], normalized_value, path + [string_key]
+            )
+          else
+            normalized_value
+          end
+        end
+      end
+
+      def merge_reserved(left, right, path = [])
+        right.each_with_object(left.dup) do |(key, value), merged|
+          merged[key] = if merged.key?(key)
+            merge_reserved_value(merged[key], value, path + [key])
+          else
+            value
+          end
+        end
+      end
+
+      def merge_reserved_value(left, right, path)
+        return merge_reserved(left, right, path) if left.is_a?(Hash) && right.is_a?(Hash)
+        return left if left == right
+
+        raise Engram::Error, "conflicting reserved metadata at #{path.join(".")}"
       end
 
       def deep_stringify(value)
