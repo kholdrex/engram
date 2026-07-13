@@ -48,12 +48,12 @@ module Engram
       attr_reader :source_id, :source_type, :message_index, :role, :spans, :alignment
 
       def initialize(source_id:, source_type:, spans:, alignment:, message_index: nil, role: nil)
-        raise ArgumentError, "source_id is required" if source_id.to_s.empty?
-        raise ArgumentError, "source_type is required" if source_type.to_s.empty?
+        raise ArgumentError, "source_id is required" if source_id.to_s.strip.empty?
+        raise ArgumentError, "source_type is required" if source_type.to_s.strip.empty?
         unless message_index.is_a?(Integer) && !message_index.negative?
           raise ArgumentError, "message_index must be a non-negative integer"
         end
-        raise ArgumentError, "role is required" if role.to_s.empty?
+        raise ArgumentError, "role is required" if role.to_s.strip.empty?
 
         unless alignment.is_a?(String) || alignment.is_a?(Symbol)
           raise ArgumentError, "unknown alignment #{alignment.inspect}"
@@ -99,8 +99,8 @@ module Engram
       attr_reader :name, :provider, :model
 
       def initialize(name:, provider: nil, model: nil)
-        raise ArgumentError, "extractor name is required" if name.to_s.empty?
-        raise ArgumentError, "extractor model is required" if model.to_s.empty?
+        raise ArgumentError, "extractor name is required" if name.to_s.strip.empty?
+        raise ArgumentError, "extractor model is required" if model.to_s.strip.empty?
 
         @name = name.to_s.dup.freeze
         @provider = provider&.to_s&.dup&.freeze
@@ -162,18 +162,7 @@ module Engram
       def attach(metadata, provenance)
         raise ArgumentError, "provenance must be a Provenance value" unless provenance.is_a?(self)
 
-        metadata = (metadata || {}).dup
-        reserved_values = [metadata.delete(RESERVED_KEY), metadata.delete(:_engram)].compact
-        unless reserved_values.all? { |reserved| reserved.is_a?(Hash) }
-          raise Engram::Error, "metadata key #{RESERVED_KEY.inspect} is reserved for Engram metadata"
-        end
-
-        reserved = reserved_values.reduce({}) do |merged, value|
-          # Attaching intentionally replaces prior provenance, regardless of key style.
-          siblings = value.reject { |key, _nested| key.to_s == METADATA_KEY }
-          merge_reserved(merged, normalize_reserved(siblings))
-        end
-        metadata.merge(RESERVED_KEY => reserved.merge(METADATA_KEY => provenance.to_h))
+        Engram::ReservedMetadata.attach(metadata, METADATA_KEY, provenance.to_h)
       end
 
       def extract(metadata)
@@ -192,64 +181,65 @@ module Engram
       private
 
       def from_h(data)
-        new(
-          sources: Array(data["sources"]).map do |source|
+        sources = provenance_array(data["sources"], "_engram.provenance.sources")
+        extractor_data = provenance_hash(data["extractor"], "_engram.provenance.extractor")
+
+        parsed_sources = sources.each_with_index.map do |source, source_index|
+          source_path = "_engram.provenance.sources[#{source_index}]"
+          source = provenance_hash(source, source_path)
+          spans = provenance_array(source["spans"], "#{source_path}.spans")
+          parsed_spans = spans.each_with_index.map do |span, span_index|
+            span_path = "#{source_path}.spans[#{span_index}]"
+            span = provenance_hash(span, span_path)
+            build_provenance_value(span_path) do
+              Span.new(
+                start_offset: span["start_offset"],
+                end_offset: span["end_offset"],
+                offset_unit: span["offset_unit"]
+              )
+            end
+          end
+
+          build_provenance_value(source_path) do
             Source.new(
               source_id: source["source_id"],
               source_type: source["source_type"],
               message_index: source["message_index"],
               role: source["role"],
-              spans: Array(source["spans"]).map do |span|
-                Span.new(
-                  start_offset: span["start_offset"],
-                  end_offset: span["end_offset"],
-                  offset_unit: span["offset_unit"]
-                )
-              end,
+              spans: parsed_spans,
               alignment: source["alignment"]
             )
-          end,
-          extractor: Extractor.new(**symbolize_extractor(data.fetch("extractor"))),
-          confidence: data["confidence"]
-        )
+          end
+        end
+
+        extractor = build_provenance_value("_engram.provenance.extractor") do
+          Extractor.new(**symbolize_extractor(extractor_data))
+        end
+        build_provenance_value("_engram.provenance") do
+          new(sources: parsed_sources, extractor: extractor, confidence: data["confidence"])
+        end
+      end
+
+      def provenance_hash(value, path)
+        return value if value.is_a?(Hash)
+
+        raise Engram::Error, "malformed provenance at #{path}: expected an object"
+      end
+
+      def provenance_array(value, path)
+        return value if value.is_a?(Array)
+
+        raise Engram::Error, "malformed provenance at #{path}: expected an array"
+      end
+
+      def build_provenance_value(path)
+        yield
+      rescue ArgumentError, TypeError, KeyError, NoMethodError => error
+        raise Engram::Error, "malformed provenance at #{path}: #{error.message}"
       end
 
       def symbolize_extractor(data)
         {name: data["name"], provider: data["provider"], model: data["model"]}
-      end
-
-      def normalize_reserved(value, path = [])
-        return value.map { |nested| normalize_reserved(nested, path) } if value.is_a?(Array)
-        return value unless value.is_a?(Hash)
-
-        value.each_with_object({}) do |(key, nested), normalized|
-          string_key = key.to_s
-          normalized_value = normalize_reserved(nested, path + [string_key])
-          normalized[string_key] = if normalized.key?(string_key)
-            merge_reserved_value(
-              normalized[string_key], normalized_value, path + [string_key]
-            )
-          else
-            normalized_value
-          end
-        end
-      end
-
-      def merge_reserved(left, right, path = [])
-        right.each_with_object(left.dup) do |(key, value), merged|
-          merged[key] = if merged.key?(key)
-            merge_reserved_value(merged[key], value, path + [key])
-          else
-            value
-          end
-        end
-      end
-
-      def merge_reserved_value(left, right, path)
-        return merge_reserved(left, right, path) if left.is_a?(Hash) && right.is_a?(Hash)
-        return left if left == right
-
-        raise Engram::Error, "conflicting reserved metadata at #{path.join(".")}"
       end
 
       def deep_stringify(value)

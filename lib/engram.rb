@@ -3,6 +3,7 @@
 require_relative "engram/version"
 require_relative "engram/configuration"
 require_relative "engram/math"
+require_relative "engram/reserved_metadata"
 require_relative "engram/embedding_metadata"
 require_relative "engram/provenance"
 require_relative "engram/memory_kind"

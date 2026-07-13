@@ -137,6 +137,18 @@ RSpec.describe Engram::Provenance do
     expect(described_class.extract(metadata)).to eq(provenance)
   end
 
+  it "preserves arbitrary sibling schemas when provenance and embedding metadata are attached in sequence" do
+    embedding = Engram::EmbeddingMetadata.build(adapter: "test", dimensions: 3)
+    metadata = {"_engram" => {"future_schema" => {"enabled" => true}}}
+
+    metadata = described_class.attach(metadata, provenance)
+    metadata = Engram::EmbeddingMetadata.merge(metadata, embedding)
+
+    expect(metadata.dig("_engram", "future_schema")).to eq("enabled" => true)
+    expect(described_class.extract(metadata)).to eq(provenance)
+    expect(Engram::EmbeddingMetadata.extract(metadata)).to eq(embedding)
+  end
+
   it "preserves unrelated metadata keys and nested values exactly" do
     nested = {feature_flag: {"mode" => :strict}}
     metadata = {:tenant => nested, "tenant" => "string tenant"}
@@ -203,5 +215,36 @@ RSpec.describe Engram::Provenance do
     metadata = {"_engram" => {"provenance" => {"version" => 2, "sources" => []}}}
 
     expect(described_class.extract(metadata)).to be_nil
+  end
+
+  it "reports malformed current-version payloads as stable Engram errors with their path" do
+    malformed = [
+      [{"sources" => {}}, "_engram.provenance.sources"],
+      [{"sources" => [nil]}, "_engram.provenance.sources[0]"],
+      [{"sources" => [{"spans" => {}}]}, "_engram.provenance.sources[0].spans"],
+      [{"sources" => [{"spans" => [nil]}]}, "_engram.provenance.sources[0].spans[0]"],
+      [{"extractor" => []}, "_engram.provenance.extractor"]
+    ]
+
+    malformed.each do |override, path|
+      payload = provenance.to_h.merge(override)
+      metadata = {"_engram" => {"provenance" => payload}}
+
+      expect { described_class.extract(metadata) }
+        .to raise_error(Engram::Error, /malformed provenance at #{Regexp.escape(path)}/)
+    end
+  end
+
+  it "rejects blank required identity fields" do
+    expect do
+      described_class::Extractor.new(name: "  ", model: "model-1")
+    end.to raise_error(ArgumentError, "extractor name is required")
+
+    expect do
+      described_class::Source.new(
+        source_id: "\t", source_type: "message", message_index: 0, role: "user",
+        spans: [described_class::Span.new(start_offset: 0, end_offset: 1)], alignment: :exact
+      )
+    end.to raise_error(ArgumentError, "source_id is required")
   end
 end

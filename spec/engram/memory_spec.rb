@@ -37,18 +37,18 @@ RSpec.describe Engram::Memory do
     )
   end
 
-  it "raises clearly when user metadata collides with Engram's reserved namespace" do
+  it "rejects scalar reserved metadata and preserves sibling Engram schemas" do
     expect do
       memory.add("hello", metadata: {"_engram" => "user data"})
     end.to raise_error(Engram::Error, /reserved for Engram embedding metadata/)
 
-    expect do
-      memory.add("hello", metadata: {"_engram" => {"user" => "data"}})
-    end.to raise_error(Engram::Error, /reserved for Engram embedding metadata/)
+    record = memory.add("hello", metadata: {
+      "_engram" => {"future_schema" => {"enabled" => true}},
+      :_engram => {other_schema: {version: 1}}
+    })
 
-    expect do
-      memory.add("hello", metadata: {"_engram" => {}, :_engram => {user: "data"}})
-    end.to raise_error(Engram::Error, /reserved for Engram embedding metadata/)
+    expect(record.metadata.dig("_engram", "future_schema")).to eq("enabled" => true)
+    expect(record.metadata.dig("_engram", "other_schema")).to eq("version" => 1)
   end
 
   it "recalls legacy records with scalar reserved metadata as metadata-free records" do
