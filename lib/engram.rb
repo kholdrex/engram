@@ -55,6 +55,10 @@ require_relative "engram/integrations/ruby_llm"
 module Engram
   class Error < StandardError; end
 
+  # Raised when an observation is suppressed by a live claim lease for a turn that has not
+  # completed. Retry after the lease expires; ObserveJob does this automatically.
+  class ObservationInProgressError < Error; end
+
   class << self
     def config
       @config ||= Configuration.new

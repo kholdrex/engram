@@ -28,6 +28,15 @@ module Engram
         Engram::Instrumentation.instrument("observe", payload) do
           claim = acquire_claim(scope, idempotency_key)
           if idempotency_key && @processed_turns && !claim
+            unless @processed_turns.completed?(scope: scope, key: idempotency_key)
+              # A live lease without a completed marker means the work is in progress
+              # elsewhere — or a previous attempt failed on an adapter whose release waits
+              # for lease expiry. Returning [] here would let a queued retry "succeed"
+              # without doing the work, permanently dropping the turn.
+              raise Engram::ObservationInProgressError,
+                "observation for this turn is claimed but not completed; retry after the claim lease expires"
+            end
+
             payload[:skipped] = true
             payload[:candidate_count] = 0
             payload[:decision_count] = 0

@@ -38,6 +38,28 @@ RSpec.describe Engram::UseCases::Observe do
     expect(store.all(scope: "u:1").map(&:content)).to eq(["User is on Pro"])
   end
 
+  it "applies valid decisions even when the model hallucinates an update target (llm consolidator)" do
+    completion = Engram::Adapters::FakeCompletion.new(responses: [
+      extraction("User likes tea", "User is on Pro"),
+      {"decisions" => [
+        {"index" => 0, "action" => "add"},
+        {"index" => 1, "action" => "update", "target_id" => 999_999}
+      ]}
+    ])
+    consolidator = Engram::Consolidators::LLMConsolidator.new(store: store, completion: completion)
+    processed = Engram::Adapters::InMemoryProcessedTurns.new
+    observe = described_class.new(store: store, extractor: extractor_for(completion),
+      consolidator: consolidator, processed_turns: processed)
+
+    decisions = observe.call(messages: ["turn"], scope: "u:1", idempotency_key: "turn-1")
+
+    expect(decisions.map(&:action)).to eq([:add])
+    expect(store.all(scope: "u:1").map(&:content)).to eq(["User likes tea"])
+    # The turn completed: a retry is suppressed and does not duplicate the add.
+    expect(observe.call(messages: ["turn"], scope: "u:1", idempotency_key: "turn-1")).to eq([])
+    expect(store.all(scope: "u:1").size).to eq(1)
+  end
+
   it "cannot apply malicious cross-scope update or forget decisions" do
     victim = store.add(Engram::Record.new(content: "private", scope: "u:2", embedding: [0.0]))
     candidate = Engram::Record.new(content: "attack", scope: "u:1", embedding: [0.0])
@@ -188,7 +210,11 @@ RSpec.describe Engram::UseCases::Observe do
       Thread.new do
         ready << true
         start.pop
-        observe.call(messages: ["x"], scope: "u:1", idempotency_key: "turn")
+        begin
+          observe.call(messages: ["x"], scope: "u:1", idempotency_key: "turn")
+        rescue Engram::ObservationInProgressError
+          :suppressed
+        end
       end
     end
     8.times { ready.pop }
@@ -197,5 +223,81 @@ RSpec.describe Engram::UseCases::Observe do
     release << true
     threads.each(&:value)
     expect(entered.size).to eq(0)
+  end
+
+  it "raises instead of silently skipping when a live claim has not completed" do
+    completion = Engram::Adapters::FakeCompletion.new(responses: [extraction("User likes tea")])
+    processed = Engram::Adapters::InMemoryProcessedTurns.new
+    processed.claim(scope: "u:1", key: "turn-1") # held elsewhere, not completed
+    observe = described_class.new(
+      store: store, extractor: extractor_for(completion),
+      consolidator: Engram::Consolidators::HeuristicConsolidator.new(store: store),
+      processed_turns: processed
+    )
+
+    expect {
+      observe.call(messages: ["I like tea"], scope: "u:1", idempotency_key: "turn-1")
+    }.to raise_error(Engram::ObservationInProgressError)
+    expect(completion.calls).to be_empty
+  end
+
+  it "does not silently drop a turn when the adapter cannot release a failed claim" do
+    # Mimics Rails::CacheProcessedTurns: release is a no-op, so a failed attempt's claim
+    # suppresses work until the lease expires.
+    no_release = Class.new do
+      include Engram::Ports::ProcessedTurns
+
+      def initialize
+        @claims = {}
+        @completed = {}
+      end
+
+      def claim(scope:, key:)
+        return nil if completed?(scope: scope, key: key) || @claims[[scope, key]]
+
+        @claims[[scope, key]] = "token"
+      end
+
+      def complete(scope:, key:, claim:)
+        @completed[[scope, key]] = true
+      end
+
+      def release(scope:, key:, claim:)
+        nil
+      end
+
+      def completed?(scope:, key:)
+        !!@completed[[scope, key]]
+      end
+
+      def expire_lease!(scope:, key:)
+        @claims.delete([scope, key])
+      end
+    end.new
+
+    attempts = 0
+    extractor = Object.new
+    extractor.define_singleton_method(:extract) do |messages:, scope:|
+      attempts += 1
+      raise "provider timeout" if attempts == 1
+
+      [Engram::Record.new(content: "User likes tea", scope: scope,
+        embedding: Engram::Adapters::NullEmbedder.new.embed("User likes tea"))]
+    end
+    observe = described_class.new(
+      store: store, extractor: extractor,
+      consolidator: Engram::Consolidators::HeuristicConsolidator.new(store: store),
+      processed_turns: no_release, embedder: embedder
+    )
+    call = -> { observe.call(messages: ["I like tea"], scope: "u:1", idempotency_key: "turn-1") }
+
+    expect { call.call }.to raise_error("provider timeout")
+    # Retry inside the lease window must fail loudly, not report success without working.
+    expect { call.call }.to raise_error(Engram::ObservationInProgressError)
+    expect(store.all(scope: "u:1")).to be_empty
+
+    no_release.expire_lease!(scope: "u:1", key: "turn-1")
+    expect(call.call.map(&:action)).to eq([:add])
+    expect(store.all(scope: "u:1").map(&:content)).to eq(["User likes tea"])
   end
 end
