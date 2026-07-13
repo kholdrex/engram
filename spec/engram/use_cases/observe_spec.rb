@@ -119,6 +119,18 @@ RSpec.describe Engram::UseCases::Observe do
     expect(store.all(scope: "u:1")).to eq([target])
   end
 
+  it "rejects a forget decision whose candidate is outside the call scope" do
+    target = store.add(Engram::Record.new(content: "Private", scope: "u:1", embedding: [0.0]))
+    candidate = Engram::Record.new(content: "Attack", scope: "u:2", embedding: [0.0])
+    decision = Engram::Decision.new(action: :forget, candidate: candidate, target_id: target.id)
+    observe = described_class.new(store: store, extractor: double(extract: [candidate]),
+      consolidator: double(reconcile_all: [decision]), embedder: embedder)
+
+    expect { observe.call(messages: ["attack"], scope: "u:1") }
+      .to raise_error(Engram::Error, "cannot move memory across scopes")
+    expect(store.all(scope: "u:1")).to eq([target])
+  end
+
   it "extracts and adds new memories (heuristic consolidator)" do
     completion = Engram::Adapters::FakeCompletion.new(responses: [extraction("User likes tea")])
     consolidator = Engram::Consolidators::HeuristicConsolidator.new(store: store)

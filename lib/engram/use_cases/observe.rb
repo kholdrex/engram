@@ -124,6 +124,7 @@ module Engram
           unless decision.candidate.is_a?(Engram::Record)
             raise Engram::Error, "forget decision candidate must be an Engram::Record"
           end
+          raise Engram::Error, "cannot move memory across scopes" unless decision.candidate.scope == scope
 
           if decision.target_id && persistence.allowed?(decision.candidate)
             deleted = @store.delete(scope: scope, id: decision.target_id)
