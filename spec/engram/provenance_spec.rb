@@ -75,7 +75,30 @@ RSpec.describe Engram::Provenance do
         sources: [provenance.sources.first],
         extractor: described_class::Extractor.new(name: "test", model: "model-1"), confidence: Complex(0, 1)
       )
-    end.to raise_error(ArgumentError, "confidence must be between 0 and 1")
+    end.to raise_error(ArgumentError, "confidence must be an Integer or Float between 0 and 1")
+  end
+
+  it "accepts JSON-native confidence values at both boundaries" do
+    [0, 1, 0.5].each do |confidence|
+      value = described_class.new(
+        sources: provenance.sources, extractor: provenance.extractor, confidence: confidence
+      )
+
+      expect(value.confidence).to eq(confidence)
+      expect(value.to_h.fetch("confidence")).to eq(confidence)
+    end
+  end
+
+  it "rejects non-JSON-native Numeric confidence values" do
+    require "bigdecimal"
+
+    [Rational(1, 2), BigDecimal("0.5")].each do |confidence|
+      expect do
+        described_class.new(
+          sources: provenance.sources, extractor: provenance.extractor, confidence: confidence
+        )
+      end.to raise_error(ArgumentError, "confidence must be an Integer or Float between 0 and 1")
+    end
   end
 
   it "requires complete source location and extractor identity fields" do
@@ -83,7 +106,7 @@ RSpec.describe Engram::Provenance do
       described_class::Source.new(
         source_id: "message:1", source_type: "message", spans: [], alignment: :exact
       )
-    end.to raise_error(ArgumentError, "message_index must be a non-negative integer")
+    end.to raise_error(ArgumentError, /missing keywords:.*message_index.*role/)
 
     expect do
       described_class::Source.new(
@@ -94,14 +117,14 @@ RSpec.describe Engram::Provenance do
 
     expect do
       described_class::Extractor.new(name: "test")
-    end.to raise_error(ArgumentError, "extractor model is required")
+    end.to raise_error(ArgumentError, /missing keyword: :model/)
 
     expect do
       described_class.new(
         sources: [provenance.sources.first],
         extractor: described_class::Extractor.new(name: "test", model: "model-1")
       )
-    end.to raise_error(ArgumentError, "confidence must be between 0 and 1")
+    end.to raise_error(ArgumentError, /missing keyword: :confidence/)
   end
 
   it "rejects empty and reversed character spans" do
@@ -125,6 +148,15 @@ RSpec.describe Engram::Provenance do
       "offset_unit" => "unicode_codepoint"
     )
     expect(described_class.extract(metadata)).to eq(provenance)
+  end
+
+  it "round-trips confidence through JSON serialization" do
+    require "json"
+
+    metadata = JSON.parse(JSON.generate(described_class.attach({}, provenance)))
+
+    expect(described_class.extract(metadata)).to eq(provenance)
+    expect(metadata.dig("_engram", "provenance", "confidence")).to be_a(Float)
   end
 
   it "coexists with embedding metadata under the reserved namespace" do

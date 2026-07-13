@@ -47,7 +47,7 @@ module Engram
     class Source
       attr_reader :source_id, :source_type, :message_index, :role, :spans, :alignment
 
-      def initialize(source_id:, source_type:, spans:, alignment:, message_index: nil, role: nil)
+      def initialize(source_id:, source_type:, message_index:, role:, spans:, alignment:)
         raise ArgumentError, "source_id is required" if source_id.to_s.strip.empty?
         raise ArgumentError, "source_type is required" if source_type.to_s.strip.empty?
         unless message_index.is_a?(Integer) && !message_index.negative?
@@ -64,7 +64,7 @@ module Engram
         @source_id = source_id.to_s.dup.freeze
         @source_type = source_type.to_s.dup.freeze
         @message_index = message_index
-        @role = role&.to_s&.dup&.freeze
+        @role = role.to_s.dup.freeze
         raise ArgumentError, "spans must be an array" unless spans.is_a?(Array)
         raise ArgumentError, "spans must contain at least one span" if spans.empty?
         @spans = spans.map do |span|
@@ -98,13 +98,13 @@ module Engram
     class Extractor
       attr_reader :name, :provider, :model
 
-      def initialize(name:, provider: nil, model: nil)
+      def initialize(name:, model:, provider: nil)
         raise ArgumentError, "extractor name is required" if name.to_s.strip.empty?
         raise ArgumentError, "extractor model is required" if model.to_s.strip.empty?
 
         @name = name.to_s.dup.freeze
         @provider = provider&.to_s&.dup&.freeze
-        @model = model&.to_s&.dup&.freeze
+        @model = model.to_s.dup.freeze
         freeze
       end
 
@@ -116,16 +116,15 @@ module Engram
       def hash = to_h.hash
 
       def to_h
-        {"name" => name}.tap do |data|
+        {"name" => name, "model" => model}.tap do |data|
           data["provider"] = provider if provider
-          data["model"] = model if model
         end
       end
     end
 
     attr_reader :sources, :extractor, :confidence
 
-    def initialize(sources:, extractor:, confidence: nil)
+    def initialize(sources:, extractor:, confidence:)
       raise ArgumentError, "sources must be an array" unless sources.is_a?(Array)
       raise ArgumentError, "sources must contain at least one source" if sources.empty?
       @sources = sources.map do |source|
@@ -133,8 +132,9 @@ module Engram
         source
       end.freeze
       raise ArgumentError, "extractor must be a Provenance::Extractor" unless extractor.is_a?(Extractor)
-      if !confidence.is_a?(Numeric) || !confidence.real? || !confidence.between?(0, 1)
-        raise ArgumentError, "confidence must be between 0 and 1"
+      valid_confidence = (confidence.is_a?(Integer) || confidence.is_a?(Float)) && confidence.between?(0, 1)
+      unless valid_confidence
+        raise ArgumentError, "confidence must be an Integer or Float between 0 and 1"
       end
 
       @extractor = extractor
