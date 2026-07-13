@@ -118,5 +118,13 @@ if deps_available
       expect(user.memory.all.map(&:content)).to eq(["User likes tea"])
       expect(completion.calls.size).to eq(1)
     end
+
+    it "registers the engram:rebuild_embeddings rake task in the host app" do
+      require "rake"
+      Rails.application.load_tasks unless Rake::Task.task_defined?("engram:rebuild_embeddings")
+
+      task = Rake::Task["engram:rebuild_embeddings"]
+      expect(task.prerequisites).to include("environment")
+    end
   end
 end

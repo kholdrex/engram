@@ -19,6 +19,10 @@ RSpec.describe "gem packaging" do
     expect(spec.files).to include("lib/generators/engram/install_generator.rb")
   end
 
+  it "ships the rake tasks the Railtie loads into host apps" do
+    expect(spec.files).to include("lib/engram/rails/tasks.rake")
+  end
+
   it "declares no hard runtime dependencies" do
     expect(spec.runtime_dependencies).to be_empty
   end
