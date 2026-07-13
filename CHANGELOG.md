@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [0.5.0] - 2026-07-17
 
 ### Added
+- Optional `Engram::Extraction` results let custom extractors attach versioned source
+  provenance while remaining compatible with plain `Engram::Record` results.
 - Embedding provenance metadata is stored with new memories so applications can detect model
   and dimension drift during store search result validation.
 - `Memory#rebuild_embeddings` and `Engram::UseCases::RebuildEmbeddings` for scoped,
@@ -18,6 +20,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `:environment` so app initializers run first. `STALE_ONLY` accepts `false`, `0`, or `no`.
 
 ### Changed
+- Persistence accepts records without provenance, rejects structurally ungrounded provenance
+  by default (configurable with `allow_ungrounded: true`), and fails closed on malformed or
+  unknown future provenance during writes while keeping reads tolerant. Provenance validation
+  does not verify source text, and source IDs are references rather than authorization
+  boundaries. The built-in LLM extractor does not emit grounded provenance.
+- Extractors must return an `Array`; each result may be a plain `Engram::Record` or an
+  `Engram::Extraction` carrying provenance.
 - `MemoryStore` mutations now require an explicit `scope:` and enforce the `(scope, id)` boundary
   for update, delete, and touch operations. Custom stores must adopt the new scoped signatures;
   `update` returns the updated record or raises `Engram::Error`, while delete and touch return an

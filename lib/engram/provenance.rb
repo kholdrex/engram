@@ -158,6 +158,10 @@ module Engram
       }
     end
 
+    def ungrounded?
+      sources.any? { |source| source.alignment == :ungrounded }
+    end
+
     class << self
       def attach(metadata, provenance)
         raise ArgumentError, "provenance must be a Provenance value" unless provenance.is_a?(self)
@@ -166,14 +170,39 @@ module Engram
       end
 
       def extract(metadata)
-        metadata = deep_stringify(metadata || {})
+        extract_for_persistence(metadata)
+      rescue Engram::Error
+        nil
+      end
+
+      # Strict parser used by writers. Ordinary reads intentionally use #extract and
+      # tolerate malformed or future schemas, but an older writer must not silently
+      # persist provenance it cannot validate.
+      def extract_for_persistence(metadata)
+        metadata ||= {}
         return nil unless metadata.is_a?(Hash)
 
-        reserved = metadata[RESERVED_KEY]
-        return nil unless reserved.is_a?(Hash)
+        reserved_values = []
+        reserved_values << metadata[RESERVED_KEY] if metadata.key?(RESERVED_KEY)
+        reserved_values << metadata[:_engram] if metadata.key?(:_engram)
+        return nil if reserved_values.empty?
+        return nil unless reserved_values.all? { |value| value.is_a?(Hash) }
+
+        reserved = reserved_values.reduce({}) do |merged, value|
+          Engram::ReservedMetadata.merge(merged, Engram::ReservedMetadata.normalize(value))
+        end
+        return nil unless reserved.key?(METADATA_KEY)
 
         data = reserved[METADATA_KEY]
-        return nil unless data.is_a?(Hash) && data["version"] == SCHEMA_VERSION
+        unless data.is_a?(Hash)
+          raise Engram::Error, "malformed provenance at _engram.provenance: expected an object"
+        end
+        unless data.key?("version")
+          raise Engram::Error, "malformed provenance at _engram.provenance.version: version is required"
+        end
+        unless data["version"] == SCHEMA_VERSION
+          raise Engram::Error, "unsupported provenance version #{data["version"].inspect}"
+        end
 
         from_h(data)
       end

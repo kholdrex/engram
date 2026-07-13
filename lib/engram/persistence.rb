@@ -24,6 +24,12 @@ module Engram
       @store.update(scope: scope, id: id, record: record) if record
     end
 
+    # Applies policy to a candidate that authorizes a destructive decision. Hooks and
+    # embedding preparation are intentionally reserved for records that will be written.
+    def allowed?(record)
+      !@persistence_policy || !@persistence_policy.call(record).nil?
+    end
+
     private
 
     def prepare(record)

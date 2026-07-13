@@ -16,11 +16,14 @@ module Engram
       /\b(?:today|now|this session)\b.*\b(?:fixed|resolved|done|completed|finished)\b/i
     ].freeze
 
-    def initialize(denylist_patterns: [])
+    def initialize(denylist_patterns: [], allow_ungrounded: false)
       @denylist_patterns = denylist_patterns
+      @allow_ungrounded = allow_ungrounded
     end
 
     def call(record)
+      provenance = Engram::Provenance.extract_for_persistence(record.metadata)
+      return nil if provenance&.ungrounded? && !@allow_ungrounded
       return nil if reject?(record.content)
 
       redact(record)

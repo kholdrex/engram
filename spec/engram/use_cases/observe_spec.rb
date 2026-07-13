@@ -12,6 +12,113 @@ RSpec.describe Engram::UseCases::Observe do
     Engram::Extractors::LLMExtractor.new(completion: completion, embedder: embedder)
   end
 
+  def provenance(alignment: :exact)
+    Engram::Provenance.new(
+      sources: [Engram::Provenance::Source.new(
+        source_id: "message:1", source_type: "message", message_index: 0, role: "user",
+        spans: [Engram::Provenance::Span.new(start_offset: 0, end_offset: 4)], alignment: alignment
+      )],
+      extractor: Engram::Provenance::Extractor.new(name: "host", model: "model-1"), confidence: 0.9
+    )
+  end
+
+  it "normalizes Record and Extraction array members before consolidation" do
+    plain = Engram::Record.new(content: "Plain", scope: "u:1", embedding: [0.0])
+    wrapped_record = Engram::Record.new(content: "Grounded", scope: "u:1", embedding: [0.0],
+      metadata: {"host" => true})
+    extraction = Engram::Extraction.new(record: wrapped_record, provenance: provenance)
+    extractor = double(extract: [plain, extraction])
+    consolidator = double
+    expect(consolidator).to receive(:reconcile_all) do |candidates:, scope:|
+      expect(scope).to eq("u:1")
+      expect(candidates).to all(be_a(Engram::Record))
+      expect(candidates.first).to equal(plain)
+      expect(Engram::Provenance.extract(candidates.last.metadata)).to eq(provenance)
+      expect(candidates.last.metadata).to include("host" => true)
+      []
+    end
+
+    described_class.new(store: store, extractor: extractor, consolidator: consolidator)
+      .call(messages: ["turn"], scope: "u:1")
+  end
+
+  it "rejects invalid extractor containers and members before consolidation or store mutation" do
+    valid = Engram::Record.new(content: "Candidate", scope: "u:1", embedding: [0.0])
+    invalid_outputs = [nil, valid, [valid].each, [Object.new], [valid, nil]]
+
+    invalid_outputs.each do |output|
+      extractor = double(extract: output)
+      consolidator = double
+      expect(consolidator).not_to receive(:reconcile_all)
+
+      expect do
+        described_class.new(store: store, extractor: extractor, consolidator: consolidator)
+          .call(messages: ["turn"], scope: "u:1")
+      end.to raise_error(Engram::Error, /extractor must return an Array containing only/)
+      expect(store.all(scope: "u:1")).to be_empty
+    end
+  end
+
+  it "releases its claim when extractor output validation fails" do
+    outputs = [nil, []]
+    extractor = Object.new
+    extractor.define_singleton_method(:extract) { |messages:, scope:| outputs.shift }
+    processed = Engram::Adapters::InMemoryProcessedTurns.new
+    observe = described_class.new(store: store, extractor: extractor,
+      consolidator: double(reconcile_all: []), processed_turns: processed)
+
+    expect { observe.call(messages: ["turn"], scope: "u:1", idempotency_key: "turn-1") }
+      .to raise_error(Engram::Error)
+    expect(observe.call(messages: ["turn"], scope: "u:1", idempotency_key: "turn-1")).to eq([])
+  end
+
+  it "validates only a forget decision's candidate without invoking write hooks" do
+    malformed_target = store.add(Engram::Record.new(content: "Old", scope: "u:1", embedding: [0.0],
+      metadata: {"_engram" => {"provenance" => {"version" => 99}}}))
+    candidate = Engram::Record.new(content: "Correction", scope: "u:1", embedding: [0.0],
+      metadata: Engram::Provenance.attach({}, provenance))
+    hook_calls = 0
+    Engram.config.before_persist = lambda do |record|
+      hook_calls += 1
+      record
+    end
+    decision = Engram::Decision.new(action: :forget, candidate: candidate, target_id: malformed_target.id)
+
+    applied = described_class.new(store: store, extractor: double(extract: [candidate]),
+      consolidator: double(reconcile_all: [decision]), embedder: embedder)
+      .call(messages: ["turn"], scope: "u:1")
+
+    expect(applied).to eq([decision])
+    expect(hook_calls).to eq(0)
+    expect(store.all(scope: "u:1")).to be_empty
+  end
+
+  it "drops a whole forget decision when candidate provenance is ungrounded" do
+    target = store.add(Engram::Record.new(content: "Old", scope: "u:1", embedding: [0.0]))
+    candidate = Engram::Record.new(content: "Correction", scope: "u:1", embedding: [0.0],
+      metadata: Engram::Provenance.attach({}, provenance(alignment: :ungrounded)))
+    decision = Engram::Decision.new(action: :forget, candidate: candidate, target_id: target.id)
+
+    applied = described_class.new(store: store, extractor: double(extract: [candidate]),
+      consolidator: double(reconcile_all: [decision]), embedder: embedder)
+      .call(messages: ["turn"], scope: "u:1")
+
+    expect(applied).to be_empty
+    expect(store.all(scope: "u:1")).to eq([target])
+  end
+
+  it "rejects a forget decision without a Record candidate before deleting" do
+    target = store.add(Engram::Record.new(content: "Old", scope: "u:1", embedding: [0.0]))
+    extracted = Engram::Record.new(content: "Correction", scope: "u:1", embedding: [0.0])
+    decision = Engram::Decision.new(action: :forget, candidate: nil, target_id: target.id)
+    observe = described_class.new(store: store, extractor: double(extract: [extracted]),
+      consolidator: double(reconcile_all: [decision]), embedder: embedder)
+
+    expect { observe.call(messages: ["turn"], scope: "u:1") }
+      .to raise_error(Engram::Error, "forget decision candidate must be an Engram::Record")
+    expect(store.all(scope: "u:1")).to eq([target])
+  end
+
   it "extracts and adds new memories (heuristic consolidator)" do
     completion = Engram::Adapters::FakeCompletion.new(responses: [extraction("User likes tea")])
     consolidator = Engram::Consolidators::HeuristicConsolidator.new(store: store)

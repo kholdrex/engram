@@ -329,6 +329,29 @@ Engram.configure do |config|
 end
 ```
 
+### Extraction provenance
+
+Custom extractors remain compatible when they return an array of plain `Engram::Record`
+values. They may instead return `Engram::Extraction` values to attach optional structured
+`Engram::Provenance` to a candidate; arrays may contain either type. Records with no
+provenance remain accepted.
+
+By default, the persistence policy rejects provenance containing a source marked
+`ungrounded`. Applications that intentionally accept it can opt out:
+
+```ruby
+Engram.configure do |config|
+  config.persistence_policy = Engram::PersistencePolicy.new(allow_ungrounded: true)
+end
+```
+
+This validation is structural: Engram does not retain source text or verify that a span or
+alignment is truthful. Source IDs are host-owned references, not authorization boundaries.
+The built-in `Engram::Extractors::LLMExtractor` continues to return plain records and does not
+emit grounded provenance. Reads tolerate malformed or future provenance metadata, but writes
+fail closed when provenance is malformed or uses an unknown future schema version; upgrade an
+older writer before rewriting such records.
+
 ## Prompt-injection and memory-injection safety
 
 Injected memories are rendered as typed XML-like elements with escaped content, which keeps

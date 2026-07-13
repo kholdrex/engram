@@ -79,9 +79,24 @@ module Engram
       def extract(messages:, scope:)
         payload = Engram::Instrumentation.payload(scope: scope, store: @store, message_count: messages.size)
         Engram::Instrumentation.instrument("extract", payload) do
-          candidates = @extractor.extract(messages: messages, scope: scope)
+          candidates = normalize_extractions(@extractor.extract(messages: messages, scope: scope))
           payload[:candidate_count] = candidates.size
           candidates
+        end
+      end
+
+      def normalize_extractions(results)
+        unless results.is_a?(Array)
+          raise Engram::Error, "extractor must return an Array containing only Engram::Record or Engram::Extraction values"
+        end
+
+        results.map do |result|
+          case result
+          when Engram::Record then result
+          when Engram::Extraction then result.to_record
+          else
+            raise Engram::Error, "extractor must return an Array containing only Engram::Record or Engram::Extraction values"
+          end
         end
       end
 
@@ -106,7 +121,11 @@ module Engram
             decision
           end
         when :forget
-          if decision.target_id
+          unless decision.candidate.is_a?(Engram::Record)
+            raise Engram::Error, "forget decision candidate must be an Engram::Record"
+          end
+
+          if decision.target_id && persistence.allowed?(decision.candidate)
             deleted = @store.delete(scope: scope, id: decision.target_id)
             decision if deleted && deleted != 0
           end

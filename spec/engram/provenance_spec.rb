@@ -245,7 +245,37 @@ RSpec.describe Engram::Provenance do
     expect(described_class.extract(metadata)).to be_nil
   end
 
-  it "reports malformed current-version payloads as stable Engram errors with their path" do
+  it "keeps ordinary reads tolerant while strict persistence parsing fails closed" do
+    malformed = {"_engram" => {"provenance" => {"version" => 1, "sources" => {}}}}
+    future = {"_engram" => {"provenance" => {"version" => 2, "sources" => []}}}
+
+    expect(described_class.extract(malformed)).to be_nil
+    expect(described_class.extract(future)).to be_nil
+    expect { described_class.extract_for_persistence(malformed) }
+      .to raise_error(Engram::Error, /malformed provenance/)
+    expect { described_class.extract_for_persistence(future) }
+      .to raise_error(Engram::Error, /unsupported provenance version 2/)
+  end
+
+  it "distinguishes absent provenance from valid provenance during persistence parsing" do
+    expect(described_class.extract_for_persistence({"host" => true})).to be_nil
+    expect(described_class.extract_for_persistence(described_class.attach({}, provenance))).to eq(provenance)
+  end
+
+  it "reports whether any source is structurally marked ungrounded" do
+    source = provenance.sources.first
+    ungrounded_source = described_class::Source.new(
+      source_id: source.source_id, source_type: source.source_type,
+      message_index: source.message_index, role: source.role, spans: source.spans,
+      alignment: :ungrounded
+    )
+
+    expect(provenance).not_to be_ungrounded
+    expect(described_class.new(sources: [source, ungrounded_source],
+      extractor: provenance.extractor, confidence: 0.8)).to be_ungrounded
+  end
+
+  it "reports malformed current-version payloads as stable strict parsing errors with their path" do
     malformed = [
       [{"sources" => {}}, "_engram.provenance.sources"],
       [{"sources" => [nil]}, "_engram.provenance.sources[0]"],
@@ -258,7 +288,8 @@ RSpec.describe Engram::Provenance do
       payload = provenance.to_h.merge(override)
       metadata = {"_engram" => {"provenance" => payload}}
 
-      expect { described_class.extract(metadata) }
+      expect(described_class.extract(metadata)).to be_nil
+      expect { described_class.extract_for_persistence(metadata) }
         .to raise_error(Engram::Error, /malformed provenance at #{Regexp.escape(path)}/)
     end
   end
