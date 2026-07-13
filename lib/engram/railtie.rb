@@ -19,5 +19,9 @@ module Engram
         require "engram/rails/observe_job"
       end
     end
+
+    rake_tasks do
+      load File.expand_path("rails/tasks.rake", __dir__)
+    end
   end
 end

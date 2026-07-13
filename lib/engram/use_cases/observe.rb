@@ -28,6 +28,12 @@ module Engram
         Engram::Instrumentation.instrument("observe", payload) do
           claim = acquire_claim(scope, idempotency_key)
           if idempotency_key && @processed_turns && !claim
+            unless @processed_turns.completed?(scope: scope, key: idempotency_key)
+              # A live, incomplete lease is retryable, not a completed duplicate.
+              raise Engram::ObservationInProgressError,
+                "observation for this turn is claimed but not completed; retry after the claim lease expires"
+            end
+
             payload[:skipped] = true
             payload[:candidate_count] = 0
             payload[:decision_count] = 0

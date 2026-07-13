@@ -11,7 +11,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `Memory#rebuild_embeddings` and `Engram::UseCases::RebuildEmbeddings` for scoped,
   deterministic rebuilding of stale vectors plus provenance metadata.
 - Added a focused rake task `engram:rebuild_embeddings` with batch control and optional
-  forced full-scope rebuild mode for recovery after provider/model changes.
+  forced full-scope rebuild mode for recovery after provider/model changes. The task is
+  packaged with the gem and loaded into host Rails apps by the Railtie, where it depends on
+  `:environment` so app initializers run first. `STALE_ONLY` accepts `false`, `0`, or `no`.
 
 ### Changed
 - `MemoryStore` mutations now require an explicit `scope:` and enforce the `(scope, id)` boundary
@@ -38,6 +40,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   metadata remain searchable when their vector dimensions match the active embedder.
 - Caller metadata keys named `_engram` are now reserved for Engram-owned embedding provenance;
   rename any application metadata stored under that key before adding new memories.
+- `RubyLLMEmbedder` now requests explicitly configured `dimensions:` from the provider (on
+  RubyLLM versions that support the option) and validates every returned vector against the
+  configured dimensions, raising a clear `Engram::Error` on mismatch. Previously the option
+  was recorded in metadata but never sent or checked, so a mismatch surfaced later as opaque
+  pgvector insert failures. If you use a model whose native vector size differs from 1536,
+  set `dimensions:` to that model's actual output size.
+
+### Fixed
+- `Observe` now raises `Engram::ObservationInProgressError` when a turn is claimed but not
+  completed, rather than reporting a successful no-op. `ObserveJob` retries this error with
+  backoff that outlasts the default claim lease; direct callers should handle it as retryable.
+- Stale detection in `rebuild_embeddings` now compares against the embedder's declared
+  dimensions instead of the stored record's vector length, so a dimensions-only embedder
+  change marks existing rows stale. Previously the default stale-only rebuild silently
+  skipped every row after such a change. Embedders that do not declare dimensions keep the
+  previous record-length comparison.
+- `LLMConsolidator` now ignores malformed decisions and rejects `update`/`forget` targets
+  that were not shown to the model, preventing invalid model output from partially applying
+  a turn. Cross-scope updates from custom consolidators still raise in `Observe`.
 
 ## [0.4.0] - 2026-06-06
 
