@@ -55,6 +55,9 @@ require_relative "engram/integrations/ruby_llm"
 module Engram
   class Error < StandardError; end
 
+  # Raised when a live claim suppresses an observation that has not completed.
+  class ObservationInProgressError < Error; end
+
   class << self
     def config
       @config ||= Configuration.new

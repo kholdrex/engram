@@ -162,7 +162,7 @@ module Engram
         stored = EmbeddingMetadata.extract(record.metadata)
         return true if stored.empty?
 
-        expected = EmbeddingMetadata.for_embedder(@embedder, embedding: record.embedding)
+        expected = expected_metadata(record)
         return true unless expected
 
         required = %w[adapter provider model dimensions fingerprint]
@@ -173,6 +173,16 @@ module Engram
           record.embedding.length != stored["dimensions"].to_i
 
         false
+      end
+
+      # What the active embedder would produce for a rebuilt row. Declared dimensions take
+      # precedence so dimension-only configuration drift marks rows stale; fall back to the
+      # record's current vector length for embedders that do not declare dimensions.
+      def expected_metadata(record)
+        declared = EmbeddingMetadata.for_embedder(@embedder)
+        return declared if declared.nil? || declared["dimensions"]
+
+        EmbeddingMetadata.for_embedder(@embedder, embedding: record.embedding)
       end
     end
   end

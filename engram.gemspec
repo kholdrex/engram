@@ -25,9 +25,10 @@ Gem::Specification.new do |spec|
   spec.metadata["bug_tracker_uri"] = "#{spec.homepage}/issues"
   spec.metadata["rubygems_mfa_required"] = "true"
 
-  # Include Ruby sources and the Rails generator templates (*.rb.tt), which the
-  # install generator copies into the host app. A plain *.rb glob would drop them.
-  spec.files = Dir.glob("lib/**/*.{rb,tt}") + %w[README.md LICENSE.txt CHANGELOG.md]
+  # Include Ruby sources, the Rails generator templates (*.rb.tt) copied into the
+  # host app by the install generator, and the rake tasks loaded by the Railtie.
+  # A plain *.rb glob would drop both.
+  spec.files = Dir.glob("lib/**/*.{rb,tt,rake}") + %w[README.md LICENSE.txt CHANGELOG.md]
   spec.require_paths = ["lib"]
 
   # NOTE: deliberately zero hard runtime dependencies — the pure core needs nothing.

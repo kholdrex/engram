@@ -579,6 +579,35 @@ RSpec.describe Engram::UseCases::RebuildEmbeddings do
     )
   end
 
+  it "marks records stale when only the embedder's declared dimensions changed" do
+    add_record(content: "resized")
+
+    resized = Engram::Adapters::NullEmbedder.new(dimensions: 8)
+    result = described_class.new(store: store, embedder: resized).call(scope: "u:1")
+
+    expect(result[:updated]).to eq(1)
+    expect(result[:skipped]).to eq(0)
+    rebuilt = store.all(scope: "u:1").first
+    expect(rebuilt.embedding.length).to eq(8)
+    expect(rebuilt.metadata.dig("_engram", "embedding", "dimensions")).to eq(8)
+  end
+
+  it "falls back to the record's vector length for embedders that do not declare dimensions" do
+    dimensionless = Object.new
+    def dimensionless.embed(text) = [0.5, 0.5]
+
+    def dimensionless.embedding_metadata = {"adapter" => "custom", "model" => "m1"}
+
+    record = Engram::Record.new(content: "alpha", scope: "u:1", embedding: [0.5, 0.5])
+    record = Engram::EmbeddingMetadata.attach(record, embedder: dimensionless)
+    store.add(record)
+
+    result = described_class.new(store: store, embedder: dimensionless).call(scope: "u:1")
+
+    expect(result[:skipped]).to eq(1)
+    expect(result[:updated]).to eq(0)
+  end
+
   it "raises on non-positive batch size" do
     expect do
       rebuild.call(scope: "u:1", batch_size: 0)
