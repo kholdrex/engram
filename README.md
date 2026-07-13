@@ -196,7 +196,9 @@ If you change embedding models, keep the database column dimension in sync with 
 embedding vector length. A model that returns 768-dimensional vectors needs a 768-dimensional
 `vector` column; a 1536-dimensional migration will not be compatible with it. The install
 generator rejects non-positive or non-integer `--dimensions` values so an invalid vector
-size does not land in a migration.
+size does not land in a migration. `RubyLLMEmbedder` requests explicitly configured
+`dimensions:` from the provider (models like `text-embedding-3-*` support shortening) and
+raises a clear error when the model's output does not match the configured dimensions.
 
 For production recall performance, add one approximate vector index after the table has
 representative data. HNSW is the recommended default for read-heavy applications because it
@@ -360,14 +362,19 @@ with the old `semantic` kind value.
 
 ## Tuning and maintenance
 
-Observation uses a scope-and-turn claim before extraction. Concurrent calls for the same
-scope and turn are suppressed while the claim lease is live, and a completed marker
-suppresses later calls only until its configured `ttl` expires. The in-memory adapter releases
-failures immediately. Generic Rails cache release is deliberately a no-op until lease expiry
-because ActiveSupport cache has no atomic compare-and-delete. In Rails, use a shared cache
-with atomic `unless_exist` writes for cross-process coordination. Set `lease_ttl` longer than
-the longest expected observation but much shorter than the completed-marker `ttl`; after a
-worker crash (or an overlong observation), the lease expires so another worker can retry.
+Observation uses a scope-and-turn claim before extraction. While a claim lease is live and
+the turn has not completed, calls for the same scope and turn raise
+`Engram::ObservationInProgressError` instead of reporting success without doing the work; a
+completed marker suppresses later calls (returning no decisions) until its configured `ttl`
+expires. `ObserveJob` retries `ObservationInProgressError` with polynomial backoff that
+outlasts the default lease, so a turn whose first attempt failed is re-observed after the
+lease expires instead of being dropped. Direct `observe` callers should treat the error as
+retryable. The in-memory adapter releases failures immediately. Generic Rails cache release
+is deliberately a no-op until lease expiry because ActiveSupport cache has no atomic
+compare-and-delete. In Rails, use a shared cache with atomic `unless_exist` writes for
+cross-process coordination. Set `lease_ttl` longer than the longest expected observation but
+much shorter than the completed-marker `ttl`; after a worker crash (or an overlong
+observation), the lease expires so a retry can proceed.
 
 Lease expiry can permit old and new workers to overlap; claims are not fencing tokens or an
 ownership guarantee. Successful work records completion but cannot safely delete a possibly
@@ -402,6 +409,10 @@ written without embedding provenance, run a scoped rebuild to refresh vectors an
 ```bash
 bundle exec rake "engram:rebuild_embeddings[user:42]"
 ```
+
+The task ships with the gem and is loaded by the Railtie, so it is available inside Rails
+applications and boots the app environment (initializers included) before running. Outside
+Rails, call `memory.rebuild_embeddings` directly.
 
 By default, only stale rows are rewritten. Set `STALE_ONLY=false` to rebuild all rows in
 the scope, and `BATCH_SIZE=<n>` to tune write size.
