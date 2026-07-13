@@ -56,29 +56,35 @@ module Engram
         candidates = Array(candidates)
         return [] if candidates.empty?
 
+        neighbors = neighbor_map(candidates, scope)
         result = @completion.complete(
           system: SYSTEM,
-          user: JSON.generate(payload(candidates, scope)),
+          user: JSON.generate(payload(candidates, neighbors)),
           schema: SCHEMA
         )
-        map_decisions(decisions(result), candidates)
+        map_decisions(decisions(result), candidates, neighbors)
       end
 
       private
 
-      def payload(candidates, scope)
-        items = candidates.each_with_index.map do |candidate, index|
-          existing = Engram::EmbeddingMetadata.search(
+      def neighbor_map(candidates, scope)
+        candidates.map do |candidate|
+          Engram::EmbeddingMetadata.search(
             @store,
             embedding: candidate.embedding,
             embedding_metadata: Engram::EmbeddingMetadata.extract(candidate.metadata),
             scope: scope,
             limit: @neighbors
           )
+        end
+      end
+
+      def payload(candidates, neighbors)
+        items = candidates.each_with_index.map do |candidate, index|
           {
             index: index,
             candidate: candidate.content,
-            existing: existing.map { |r| {id: r.id, content: r.content} }
+            existing: neighbors[index].map { |r| {id: r.id, content: r.content} }
           }
         end
         {candidates: items}
@@ -87,19 +93,36 @@ module Engram
       def decisions(result)
         return [] unless result.is_a?(Hash)
 
-        result["decisions"] || result[:decisions] || []
+        decisions = result["decisions"] || result[:decisions] || []
+        decisions.is_a?(Array) ? decisions : []
       end
 
-      def map_decisions(raw, candidates)
+      # Schema conformance is prompt-level on some providers, so treat the response as
+      # untrusted: drop malformed decisions and update/forget targets the model was never
+      # shown, instead of letting them abort the turn after earlier decisions applied.
+      def map_decisions(raw, candidates, neighbors)
+        seen = Set.new
         raw.filter_map do |decision|
+          next unless decision.is_a?(Hash)
+
           decision = decision.transform_keys(&:to_s)
           index = decision["index"]
-          next unless index && candidates[index]
+          next unless index.is_a?(Integer) && index >= 0 && candidates[index]
+          next if seen.include?(index)
 
+          action = (decision["action"] || "noop").to_s
+          next unless Engram::Decision::ACTIONS.include?(action.to_sym)
+
+          target_id = decision["target_id"]
+          if %w[update forget].include?(action)
+            next unless neighbors[index].any? { |neighbor| neighbor.id == target_id }
+          end
+
+          seen.add(index)
           Engram::Decision.new(
-            action: (decision["action"] || "noop").to_sym,
+            action: action.to_sym,
             candidate: candidates[index],
-            target_id: decision["target_id"],
+            target_id: target_id,
             reason: decision["reason"]
           )
         end

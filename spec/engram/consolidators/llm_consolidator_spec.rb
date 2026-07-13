@@ -41,4 +41,74 @@ RSpec.describe Engram::Consolidators::LLMConsolidator do
     expect(result).to eq([])
     expect(completion.calls).to be_empty
   end
+
+  it "drops update/forget decisions whose target_id was never shown to the model" do
+    store.add(rec("plan is Free"))
+    completion = Engram::Adapters::FakeCompletion.new(responses: [
+      {"decisions" => [
+        {"index" => 0, "action" => "update", "target_id" => 999_999},
+        {"index" => 1, "action" => "forget", "target_id" => 999_999}
+      ]}
+    ])
+
+    decisions = described_class.new(store: store, completion: completion)
+      .reconcile_all(candidates: [rec("plan is Pro"), rec("likes tea")], scope: "u:1")
+
+    expect(decisions).to be_empty
+  end
+
+  it "keeps update/forget decisions targeting a presented neighbor" do
+    existing = store.add(rec("plan is Free"))
+    completion = Engram::Adapters::FakeCompletion.new(responses: [
+      {"decisions" => [{"index" => 0, "action" => "forget", "target_id" => existing.id}]}
+    ])
+
+    decisions = described_class.new(store: store, completion: completion)
+      .reconcile_all(candidates: [rec("plan is Pro")], scope: "u:1")
+
+    expect(decisions.map(&:action)).to eq([:forget])
+    expect(decisions.first.target_id).to eq(existing.id)
+  end
+
+  it "drops malformed decisions instead of raising" do
+    completion = Engram::Adapters::FakeCompletion.new(responses: [
+      {"decisions" => [
+        "not a hash",
+        {"index" => "0", "action" => "add"},
+        {"index" => -1, "action" => "add"},
+        {"index" => 5, "action" => "add"},
+        {"index" => 0, "action" => "merge"},
+        {"index" => 0, "action" => "add"}
+      ]}
+    ])
+
+    decisions = described_class.new(store: store, completion: completion)
+      .reconcile_all(candidates: [rec("plan is Pro")], scope: "u:1")
+
+    expect(decisions.size).to eq(1)
+    expect(decisions.first.action).to eq(:add)
+  end
+
+  it "keeps only the first decision per candidate index" do
+    completion = Engram::Adapters::FakeCompletion.new(responses: [
+      {"decisions" => [
+        {"index" => 0, "action" => "add"},
+        {"index" => 0, "action" => "add"}
+      ]}
+    ])
+
+    decisions = described_class.new(store: store, completion: completion)
+      .reconcile_all(candidates: [rec("plan is Pro")], scope: "u:1")
+
+    expect(decisions.size).to eq(1)
+  end
+
+  it "tolerates a non-array decisions payload" do
+    completion = Engram::Adapters::FakeCompletion.new(responses: [{"decisions" => "garbage"}])
+
+    decisions = described_class.new(store: store, completion: completion)
+      .reconcile_all(candidates: [rec("plan is Pro")], scope: "u:1")
+
+    expect(decisions).to be_empty
+  end
 end
