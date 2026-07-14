@@ -28,7 +28,9 @@ module Engram
     # provenance raises Engram::Error rather than authorizing the decision. Hooks and embedding
     # preparation are intentionally reserved for records that will be written.
     def allowed?(record)
-      !@persistence_policy || !!@persistence_policy.call(record)
+      record = @persistence_policy.call(record) if @persistence_policy
+      Engram::Provenance.extract_for_persistence(record.metadata) if record
+      !!record
     end
 
     private
@@ -37,6 +39,7 @@ module Engram
       original_content = record.content
       record = @before_persist.call(record) if @before_persist
       record = @persistence_policy.call(record) if record && @persistence_policy
+      Engram::Provenance.extract_for_persistence(record.metadata) if record
       if record && record.content != original_content
         record = record.with(embedding: @embedder.embed(record.content))
       end
