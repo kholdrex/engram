@@ -1,9 +1,11 @@
 # frozen_string_literal: true
 
 RSpec.describe Engram::Persistence do
+  let(:store) { Engram::Adapters::InMemoryStore.new }
+
   subject(:persistence) do
     described_class.new(
-      store: Engram::Adapters::InMemoryStore.new,
+      store: store,
       embedder: Engram::Adapters::NullEmbedder.new,
       persistence_policy: policy
     )
@@ -55,6 +57,33 @@ RSpec.describe Engram::Persistence do
         )
 
         expect { persistence.add(record) }.to raise_error(Engram::Error, /unsupported provenance version 99/)
+      end
+    end
+  end
+
+  describe "#update" do
+    context "without a persistence policy" do
+      let(:policy) { nil }
+      let(:stored_record) { persistence.add(record.with(metadata: {"source" => "original"})) }
+
+      it "fails closed on malformed provenance" do
+        original = stored_record.to_h
+        candidate = stored_record.with(content: "User likes coffee", metadata: malformed_provenance)
+
+        expect {
+          persistence.update(scope: candidate.scope, id: stored_record.id, record: candidate)
+        }.to raise_error(Engram::Error, /malformed provenance/)
+        expect(store.all(scope: stored_record.scope).map(&:to_h)).to eq([original])
+      end
+
+      it "fails closed on future provenance" do
+        original = stored_record.to_h
+        candidate = stored_record.with(content: "User likes coffee", metadata: future_provenance)
+
+        expect {
+          persistence.update(scope: candidate.scope, id: stored_record.id, record: candidate)
+        }.to raise_error(Engram::Error, /unsupported provenance version 99/)
+        expect(store.all(scope: stored_record.scope).map(&:to_h)).to eq([original])
       end
     end
   end
