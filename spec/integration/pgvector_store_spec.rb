@@ -223,6 +223,13 @@ if deps_available
       expect(store.all(scope: "u:1", after_id: second_record.id).map(&:content)).to eq(["second"])
     end
 
+    it "returns only requested ids that exist in the scope" do
+      mine = store.add(rec("mine", embedding: [1.0, 0.0, 0.0], scope: "u:1"))
+      theirs = store.add(rec("theirs", embedding: [1.0, 0.0, 0.0], scope: "u:2"))
+
+      expect(store.existing_ids(scope: "u:1", ids: [theirs.id, mine.id, -1])).to eq([mine.id])
+    end
+
     it "deletes a record by id" do
       stored = store.add(rec("temp", embedding: [1.0, 0.0, 0.0]))
       expect(store.delete(scope: "u:1", id: stored.id)).to eq(1)

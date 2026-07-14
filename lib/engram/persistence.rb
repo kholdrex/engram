@@ -12,38 +12,64 @@ module Engram
     end
 
     def add(record, scope: record.scope)
-      record = prepare(record)
-      if record && record.scope != scope
-        raise Engram::Error, "cannot move memory across scopes"
-      end
-      @store.add(record) if record
+      add_prepared(prepare(record), scope: scope)
     end
 
     def update(scope:, id:, record:)
-      record = prepare(record)
-      @store.update(scope: scope, id: id, record: record) if record
+      update_prepared(scope: scope, id: id, record: prepare(record))
+    end
+
+    # Persists a record already returned by #prepare. These split-phase methods let
+    # orchestrators prepare a complete batch before beginning store mutations.
+    def add_prepared(record, scope: record&.scope)
+      return unless record
+
+      validate_provenance!(record)
+      raise Engram::Error, "cannot move memory across scopes" unless record.scope == scope
+
+      @store.add(record)
+    end
+
+    def update_prepared(scope:, id:, record:)
+      return unless record
+
+      validate_provenance!(record)
+      raise Engram::Error, "cannot move memory across scopes" unless record.scope == scope
+
+      @store.update(scope: scope, id: id, record: record)
+    end
+
+    # Applies all write transformations without mutating the store. Input is validated
+    # before callbacks can remove or replace provenance, and final output is validated too.
+    def prepare(record)
+      validate_provenance!(record)
+      original_content = record.content
+      record = @before_persist.call(record) if @before_persist
+      validate_provenance!(record) if record
+      record = @persistence_policy.call(record) if record && @persistence_policy
+      validate_provenance!(record) if record
+      if record && record.content != original_content
+        record = record.with(embedding: @embedder.embed(record.content))
+      end
+      record = Engram::EmbeddingMetadata.attach(record, embedder: @embedder) if record
+      validate_provenance!(record) if record
+      record
     end
 
     # Applies policy to a candidate that authorizes a destructive decision. Malformed
     # provenance raises Engram::Error rather than authorizing the decision. Hooks and embedding
     # preparation are intentionally reserved for records that will be written.
     def allowed?(record)
+      validate_provenance!(record)
       record = @persistence_policy.call(record) if @persistence_policy
-      Engram::Provenance.extract_for_persistence(record.metadata) if record
+      validate_provenance!(record) if record
       !!record
     end
 
     private
 
-    def prepare(record)
-      original_content = record.content
-      record = @before_persist.call(record) if @before_persist
-      record = @persistence_policy.call(record) if record && @persistence_policy
-      Engram::Provenance.extract_for_persistence(record.metadata) if record
-      if record && record.content != original_content
-        record = record.with(embedding: @embedder.embed(record.content))
-      end
-      record ? Engram::EmbeddingMetadata.attach(record, embedder: @embedder) : nil
+    def validate_provenance!(record)
+      Engram::Provenance.extract_for_persistence(record.metadata)
     end
   end
 end

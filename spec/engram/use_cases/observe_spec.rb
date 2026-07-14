@@ -88,7 +88,8 @@ RSpec.describe Engram::UseCases::Observe do
       consolidator: double(reconcile_all: [decision]), embedder: embedder)
       .call(messages: ["turn"], scope: "u:1")
 
-    expect(applied).to eq([decision])
+    expect(applied.map(&:action)).to eq([:forget])
+    expect(applied.first.candidate).to equal(candidate)
     expect(hook_calls).to eq(0)
     expect(store.all(scope: "u:1")).to be_empty
   end
@@ -129,6 +130,390 @@ RSpec.describe Engram::UseCases::Observe do
     expect { observe.call(messages: ["attack"], scope: "u:1") }
       .to raise_error(Engram::Error, "cannot move memory across scopes")
     expect(store.all(scope: "u:1")).to eq([target])
+  end
+
+  it "rejects a forged same-scope candidate returned by a custom consolidator" do
+    target = store.add(Engram::Record.new(content: "Private", scope: "u:1", embedding: [0.0]))
+    extracted = Engram::Record.new(content: "Correction", scope: "u:1", embedding: [0.0])
+    forged = extracted.with(content: "Forged authorization")
+    decision = Engram::Decision.new(action: :forget, candidate: forged, target_id: target.id)
+    observe = described_class.new(store: store, extractor: double(extract: [extracted]),
+      consolidator: double(reconcile_all: [decision]), embedder: embedder)
+
+    expect { observe.call(messages: ["turn"], scope: "u:1") }
+      .to raise_error(Engram::Error, /candidate supplied to the consolidator/)
+    expect(store.all(scope: "u:1")).to eq([target])
+  end
+
+  it "rejects two forget decisions for the same candidate before deleting either target" do
+    targets = ["First", "Second"].map do |content|
+      store.add(Engram::Record.new(content: content, scope: "u:1", embedding: [0.0]))
+    end
+    candidate = Engram::Record.new(content: "Correction", scope: "u:1", embedding: [0.0])
+    decisions = targets.map do |target|
+      Engram::Decision.new(action: :forget, candidate: candidate, target_id: target.id)
+    end
+    observe = described_class.new(store: store, extractor: double(extract: [candidate]),
+      consolidator: double(reconcile_all: decisions), embedder: embedder)
+
+    expect { observe.call(messages: ["turn"], scope: "u:1") }
+      .to raise_error(Engram::Error, /multiple decisions reference the same candidate/)
+    expect(store.all(scope: "u:1")).to match_array(targets)
+  end
+
+  it "rejects duplicate and mixed decisions for one candidate before any mutation" do
+    [
+      %i[add add],
+      %i[add noop]
+    ].each do |actions|
+      candidate = Engram::Record.new(content: "Candidate", scope: "u:1", embedding: [0.0])
+      decisions = actions.map { |action| Engram::Decision.new(action: action, candidate: candidate) }
+      observe = described_class.new(store: store, extractor: double(extract: [candidate]),
+        consolidator: double(reconcile_all: decisions), embedder: embedder)
+
+      expect { observe.call(messages: ["turn"], scope: "u:1") }
+        .to raise_error(Engram::Error, /multiple decisions reference the same candidate/)
+      expect(store.all(scope: "u:1")).to be_empty
+    end
+  end
+
+  it "allows one decision per occurrence when extraction repeats the same candidate instance" do
+    candidate = Engram::Record.new(content: "Candidate", scope: "u:1", embedding: [0.0])
+    decisions = [
+      Engram::Decision.new(action: :add, candidate: candidate),
+      Engram::Decision.new(action: :noop, candidate: candidate)
+    ]
+    observe = described_class.new(store: store, extractor: double(extract: [candidate, candidate]),
+      consolidator: double(reconcile_all: decisions), embedder: embedder)
+
+    applied = observe.call(messages: ["turn"], scope: "u:1")
+    expect(applied.map(&:action)).to eq([:add])
+    expect(applied.first.candidate).to equal(candidate)
+    expect(store.all(scope: "u:1").map(&:content)).to eq(["Candidate"])
+  end
+
+  it "rejects a consolidator that clears candidate metadata before authorizing deletion" do
+    target = store.add(Engram::Record.new(content: "Old", scope: "u:1", embedding: [0.0]))
+    candidate = Engram::Record.new(content: "Ungrounded correction", scope: "u:1", embedding: [0.0],
+      metadata: Engram::Provenance.attach({}, provenance(alignment: :ungrounded)))
+    consolidator = Object.new
+    consolidator.define_singleton_method(:reconcile_all) do |candidates:, scope:|
+      candidates.first.metadata.clear
+      [Engram::Decision.new(action: :forget, candidate: candidates.first, target_id: target.id)]
+    end
+    observe = described_class.new(store: store, extractor: double(extract: [candidate]),
+      consolidator: consolidator, embedder: embedder)
+
+    expect { observe.call(messages: ["turn"], scope: "u:1") }
+      .to raise_error(Engram::Error, /must not mutate candidates/)
+    expect(store.all(scope: "u:1")).to eq([target])
+  end
+
+  it "rejects nested provenance mutation by a custom consolidator" do
+    target = store.add(Engram::Record.new(content: "Old", scope: "u:1", embedding: [0.0]))
+    candidate = Engram::Record.new(content: "Ungrounded correction", scope: "u:1", embedding: [0.0],
+      metadata: Engram::Provenance.attach({}, provenance(alignment: :ungrounded)))
+    consolidator = Object.new
+    consolidator.define_singleton_method(:reconcile_all) do |candidates:, scope:|
+      candidates.first.metadata.dig("_engram", "provenance", "sources").first["alignment"] = "exact"
+      [Engram::Decision.new(action: :forget, candidate: candidates.first, target_id: target.id)]
+    end
+    observe = described_class.new(store: store, extractor: double(extract: [candidate]),
+      consolidator: consolidator, embedder: embedder)
+
+    expect { observe.call(messages: ["turn"], scope: "u:1") }
+      .to raise_error(Engram::Error, /must not mutate candidates/)
+    expect(store.all(scope: "u:1")).to eq([target])
+  end
+
+  it "rejects deferred candidate mutation by a decision accessor before applying anything" do
+    target = store.add(Engram::Record.new(content: "Old", scope: "u:1", embedding: [0.0]))
+    first = Engram::Record.new(content: "Safe", scope: "u:1", embedding: [0.0])
+    second = Engram::Record.new(content: "Ungrounded correction", scope: "u:1", embedding: [0.0],
+      metadata: Engram::Provenance.attach({}, provenance(alignment: :ungrounded)))
+    mutating_decision = Class.new(Engram::Decision) do
+      def candidate
+        @candidate.metadata.dig("_engram", "provenance", "sources").first["alignment"] = "exact"
+        @candidate
+      end
+    end
+    decisions = [
+      Engram::Decision.new(action: :add, candidate: first),
+      mutating_decision.new(action: :forget, candidate: second, target_id: target.id)
+    ]
+    observe = described_class.new(store: store, extractor: double(extract: [first, second]),
+      consolidator: double(reconcile_all: decisions), embedder: embedder)
+
+    expect { observe.call(messages: ["turn"], scope: "u:1") }
+      .to raise_error(Engram::Error, /must not mutate candidates/)
+    expect(store.all(scope: "u:1")).to eq([target])
+  end
+
+  it "reads each untrusted decision accessor once and uses only canonical values afterward" do
+    candidate = Engram::Record.new(content: "Safe", scope: "u:1", embedding: [0.0])
+    changing_decision = Class.new(Engram::Decision) do
+      attr_reader :calls
+
+      def initialize(...)
+        super
+        @calls = Hash.new(0)
+      end
+
+      %i[action candidate target_id reason].each do |attribute|
+        define_method(attribute) do
+          @calls[attribute] += 1
+          return :destroy if attribute == :action && @calls[attribute] > 1
+          return nil if attribute == :candidate && @calls[attribute] > 1
+
+          instance_variable_get("@#{attribute}")
+        end
+      end
+    end
+    raw_decision = changing_decision.new(action: :add, candidate: candidate, reason: "safe")
+
+    applied = described_class.new(store: store, extractor: double(extract: [candidate]),
+      consolidator: double(reconcile_all: [raw_decision]), embedder: embedder)
+      .call(messages: ["turn"], scope: "u:1")
+
+    expect(applied.map(&:class)).to eq([Engram::Decision])
+    expect(applied.map(&:action)).to eq([:add])
+    expect(raw_decision.calls).to eq(action: 1, candidate: 1, target_id: 1, reason: 1)
+    expect(store.all(scope: "u:1").map(&:content)).to eq(["Safe"])
+  end
+
+  it "preflights every decision before applying any store mutation" do
+    first = Engram::Record.new(content: "Safe", scope: "u:1", embedding: [0.0])
+    second = Engram::Record.new(content: "Correction", scope: "u:1", embedding: [0.0])
+    forged = second.with(content: "Forged")
+    decisions = [
+      Engram::Decision.new(action: :add, candidate: first),
+      Engram::Decision.new(action: :forget, candidate: forged, target_id: 123)
+    ]
+    observe = described_class.new(store: store, extractor: double(extract: [first, second]),
+      consolidator: double(reconcile_all: decisions), embedder: embedder)
+
+    expect { observe.call(messages: ["turn"], scope: "u:1") }
+      .to raise_error(Engram::Error, /candidate supplied to the consolidator/)
+    expect(store.all(scope: "u:1")).to be_empty
+  end
+
+  it "preflights transformed provenance before applying an earlier decision" do
+    first = Engram::Record.new(content: "Safe", scope: "u:1", embedding: [0.0])
+    second = Engram::Record.new(content: "Malformed later", scope: "u:1", embedding: [0.0])
+    malformed = {"_engram" => {"provenance" => {"version" => 99}}}
+    Engram.config.before_persist = lambda do |candidate|
+      candidate.equal?(second) ? candidate.with(metadata: malformed) : candidate
+    end
+    decisions = [first, second].map { |candidate| Engram::Decision.new(action: :add, candidate: candidate) }
+    observe = described_class.new(store: store, extractor: double(extract: [first, second]),
+      consolidator: double(reconcile_all: decisions), embedder: embedder)
+
+    expect { observe.call(messages: ["turn"], scope: "u:1") }
+      .to raise_error(Engram::Error, /unsupported provenance version 99/)
+    expect(store.all(scope: "u:1")).to be_empty
+  end
+
+  it "preflights an update target in another scope before applying an earlier add" do
+    victim = store.add(Engram::Record.new(content: "Private", scope: "u:2", embedding: [0.0]))
+    first = Engram::Record.new(content: "Safe", scope: "u:1", embedding: [0.0])
+    second = Engram::Record.new(content: "Attack", scope: "u:1", embedding: [0.0])
+    decisions = [
+      Engram::Decision.new(action: :add, candidate: first),
+      Engram::Decision.new(action: :update, candidate: second, target_id: victim.id)
+    ]
+    observe = described_class.new(store: store, extractor: double(extract: [first, second]),
+      consolidator: double(reconcile_all: decisions), embedder: embedder)
+
+    expect { observe.call(messages: ["turn"], scope: "u:1") }
+      .to raise_error(Engram::Error, /no memory with id/)
+    expect(store.all(scope: "u:1")).to be_empty
+    expect(store.all(scope: "u:2")).to eq([victim])
+  end
+
+  it "preflights a nonexistent update target before applying an earlier add" do
+    first = Engram::Record.new(content: "Safe", scope: "u:1", embedding: [0.0])
+    second = Engram::Record.new(content: "Correction", scope: "u:1", embedding: [0.0])
+    decisions = [
+      Engram::Decision.new(action: :add, candidate: first),
+      Engram::Decision.new(action: :update, candidate: second, target_id: 999_999)
+    ]
+    observe = described_class.new(store: store, extractor: double(extract: [first, second]),
+      consolidator: double(reconcile_all: decisions), embedder: embedder)
+
+    expect { observe.call(messages: ["turn"], scope: "u:1") }
+      .to raise_error(Engram::Error, /no memory with id/)
+    expect(store.all(scope: "u:1")).to be_empty
+  end
+
+  it "preflights a nonexistent forget target before applying an earlier add" do
+    first = Engram::Record.new(content: "Safe", scope: "u:1", embedding: [0.0])
+    second = Engram::Record.new(content: "Correction", scope: "u:1", embedding: [0.0])
+    decisions = [
+      Engram::Decision.new(action: :add, candidate: first),
+      Engram::Decision.new(action: :forget, candidate: second, target_id: 999_999)
+    ]
+    observe = described_class.new(store: store, extractor: double(extract: [first, second]),
+      consolidator: double(reconcile_all: decisions), embedder: embedder)
+
+    expect { observe.call(messages: ["turn"], scope: "u:1") }
+      .to raise_error(Engram::Error, /no memory with id/)
+    expect(store.all(scope: "u:1")).to be_empty
+  end
+
+  it "uses scoped bulk id existence without loading all records" do
+    target = store.add(Engram::Record.new(content: "Old", scope: "u:1", embedding: [0.0]))
+    candidate = Engram::Record.new(content: "New", scope: "u:1", embedding: [0.0])
+    decision = Engram::Decision.new(action: :update, candidate: candidate, target_id: target.id)
+    allow(store).to receive(:existing_ids).and_call_original
+    expect(store).not_to receive(:all)
+
+    described_class.new(store: store, extractor: double(extract: [candidate]),
+      consolidator: double(reconcile_all: [decision]), embedder: embedder)
+      .call(messages: ["turn"], scope: "u:1")
+
+    expect(store).to have_received(:existing_ids).with(scope: "u:1", ids: [target.id])
+  end
+
+  it "falls back to all for a legacy store without scoped bulk id existence" do
+    target = store.add(Engram::Record.new(content: "Old", scope: "u:1", embedding: [0.0]))
+    legacy_store = Class.new do
+      def initialize(delegate)
+        @delegate = delegate
+      end
+
+      def method_missing(name, ...)
+        @delegate.public_send(name, ...)
+      end
+
+      def respond_to_missing?(name, include_private = false)
+        name != :existing_ids && @delegate.respond_to?(name, include_private)
+      end
+    end.new(store)
+    candidate = Engram::Record.new(content: "New", scope: "u:1", embedding: [0.0])
+    decision = Engram::Decision.new(action: :update, candidate: candidate, target_id: target.id)
+    expect(legacy_store).to receive(:all).with(scope: "u:1").and_call_original
+
+    described_class.new(store: legacy_store, extractor: double(extract: [candidate]),
+      consolidator: double(reconcile_all: [decision]), embedder: embedder)
+      .call(messages: ["turn"], scope: "u:1")
+  end
+
+  it "falls back to all when the optional scoped bulk id capability is not implemented" do
+    target = store.add(Engram::Record.new(content: "Old", scope: "u:1", embedding: [0.0]))
+    allow(store).to receive(:existing_ids).and_raise(NotImplementedError)
+    expect(store).to receive(:all).with(scope: "u:1").and_call_original
+    candidate = Engram::Record.new(content: "New", scope: "u:1", embedding: [0.0])
+    decision = Engram::Decision.new(action: :update, candidate: candidate, target_id: target.id)
+
+    described_class.new(store: store, extractor: double(extract: [candidate]),
+      consolidator: double(reconcile_all: [decision]), embedder: embedder)
+      .call(messages: ["turn"], scope: "u:1")
+  end
+
+  it "rejects conflicting destructive decisions for one target before mutation" do
+    target = store.add(Engram::Record.new(content: "Old", scope: "u:1", embedding: [0.0]))
+    forget_candidate = Engram::Record.new(content: "Forget", scope: "u:1", embedding: [0.0])
+    update_candidate = Engram::Record.new(content: "Update", scope: "u:1", embedding: [0.0])
+    decisions = [
+      Engram::Decision.new(action: :forget, candidate: forget_candidate, target_id: target.id),
+      Engram::Decision.new(action: :update, candidate: update_candidate, target_id: target.id)
+    ]
+
+    expect do
+      described_class.new(store: store, extractor: double(extract: [forget_candidate, update_candidate]),
+        consolidator: double(reconcile_all: decisions), embedder: embedder)
+        .call(messages: ["turn"], scope: "u:1")
+    end.to raise_error(Engram::Error, /multiple decisions target memory/)
+    expect(store.all(scope: "u:1")).to eq([target])
+  end
+
+  it "rejects duplicate updates and duplicate forgets for one target" do
+    %i[update forget].each do |action|
+      target = store.add(Engram::Record.new(content: "Old", scope: "u:1", embedding: [0.0]))
+      candidates = 2.times.map do |index|
+        Engram::Record.new(content: "Candidate #{index}", scope: "u:1", embedding: [0.0])
+      end
+      decisions = candidates.map do |candidate|
+        Engram::Decision.new(action: action, candidate: candidate, target_id: target.id)
+      end
+
+      expect do
+        described_class.new(store: store, extractor: double(extract: candidates),
+          consolidator: double(reconcile_all: decisions), embedder: embedder)
+          .call(messages: ["turn"], scope: "u:1")
+      end.to raise_error(Engram::Error, /multiple decisions target memory/)
+      expect(store.all(scope: "u:1")).to include(target)
+      store.clear
+    end
+  end
+
+  it "preflights a cross-scope forget target before applying an earlier add" do
+    victim = store.add(Engram::Record.new(content: "Private", scope: "u:2", embedding: [0.0]))
+    first = Engram::Record.new(content: "Safe", scope: "u:1", embedding: [0.0])
+    second = Engram::Record.new(content: "Attack", scope: "u:1", embedding: [0.0])
+    decisions = [
+      Engram::Decision.new(action: :add, candidate: first),
+      Engram::Decision.new(action: :forget, candidate: second, target_id: victim.id)
+    ]
+    observe = described_class.new(store: store, extractor: double(extract: [first, second]),
+      consolidator: double(reconcile_all: decisions), embedder: embedder)
+
+    expect { observe.call(messages: ["turn"], scope: "u:1") }
+      .to raise_error(Engram::Error, /no memory with id/)
+    expect(store.all(scope: "u:1")).to be_empty
+    expect(store.all(scope: "u:2")).to eq([victim])
+  end
+
+  it "preflights an unsupported decision action before applying an earlier add" do
+    malformed_decision = Class.new(Engram::Decision) do
+      def action = :destroy
+    end
+    first = Engram::Record.new(content: "Safe", scope: "u:1", embedding: [0.0])
+    second = Engram::Record.new(content: "Attack", scope: "u:1", embedding: [0.0])
+    decisions = [
+      Engram::Decision.new(action: :add, candidate: first),
+      malformed_decision.new(action: :noop, candidate: second)
+    ]
+    observe = described_class.new(store: store, extractor: double(extract: [first, second]),
+      consolidator: double(reconcile_all: decisions), embedder: embedder)
+
+    expect { observe.call(messages: ["turn"], scope: "u:1") }
+      .to raise_error(Engram::Error, /unsupported decision action :destroy/)
+    expect(store.all(scope: "u:1")).to be_empty
+  end
+
+  it "rejects falsey update targets before applying an earlier add" do
+    [nil, false].each do |target_id|
+      first = Engram::Record.new(content: "Safe", scope: "u:1", embedding: [0.0])
+      second = Engram::Record.new(content: "Correction", scope: "u:1", embedding: [0.0])
+      decisions = [
+        Engram::Decision.new(action: :add, candidate: first),
+        Engram::Decision.new(action: :update, candidate: second, target_id: target_id)
+      ]
+      observe = described_class.new(store: store, extractor: double(extract: [first, second]),
+        consolidator: double(reconcile_all: decisions), embedder: embedder)
+
+      expect { observe.call(messages: ["turn"], scope: "u:1") }
+        .to raise_error(Engram::Error, "update decision requires a target_id")
+      expect(store.all(scope: "u:1")).to be_empty
+    end
+  end
+
+  it "rejects falsey forget targets before applying an earlier add" do
+    [nil, false].each do |target_id|
+      first = Engram::Record.new(content: "Safe", scope: "u:1", embedding: [0.0])
+      second = Engram::Record.new(content: "Correction", scope: "u:1", embedding: [0.0])
+      decisions = [
+        Engram::Decision.new(action: :add, candidate: first),
+        Engram::Decision.new(action: :forget, candidate: second, target_id: target_id)
+      ]
+      observe = described_class.new(store: store, extractor: double(extract: [first, second]),
+        consolidator: double(reconcile_all: decisions), embedder: embedder)
+
+      expect { observe.call(messages: ["turn"], scope: "u:1") }
+        .to raise_error(Engram::Error, "forget decision requires a target_id")
+      expect(store.all(scope: "u:1")).to be_empty
+    end
   end
 
   it "extracts and adds new memories (heuristic consolidator)" do
@@ -193,10 +578,11 @@ RSpec.describe Engram::UseCases::Observe do
 
     forget = double(reconcile_all: [Engram::Decision.new(action: :forget,
       candidate: candidate, target_id: victim.id)])
-    decisions = described_class.new(store: store, extractor: extractor, consolidator: forget, embedder: embedder)
-      .call(messages: ["attack"], scope: "u:1")
+    expect {
+      described_class.new(store: store, extractor: extractor, consolidator: forget, embedder: embedder)
+        .call(messages: ["attack"], scope: "u:1")
+    }.to raise_error(Engram::Error)
 
-    expect(decisions).to be_empty
     expect(store.all(scope: "u:2").map(&:content)).to eq(["private"])
   end
 

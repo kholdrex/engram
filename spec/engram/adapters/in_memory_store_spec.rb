@@ -160,6 +160,13 @@ RSpec.describe Engram::Adapters::InMemoryStore do
     expect(store.all(scope: "u:1", after_id: second_record.id).map(&:content)).to eq(["second"])
   end
 
+  it "returns only requested ids that exist in the scope" do
+    mine = store.add(rec("mine", scope: "u:1", embedding: [1.0, 0.0]))
+    theirs = store.add(rec("theirs", scope: "u:2", embedding: [1.0, 0.0]))
+
+    expect(store.existing_ids(scope: "u:1", ids: [theirs.id, mine.id, 999, mine.id])).to eq([mine.id])
+  end
+
   it "deletes a record by id" do
     r = store.add(rec("x", scope: "u:1", embedding: [1.0, 0.0]))
     expect(store.delete(scope: "u:1", id: r.id)).to eq(1)

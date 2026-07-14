@@ -25,6 +25,14 @@ module Engram
         raise NotImplementedError, "#{self.class} must implement #all"
       end
 
+      # Optional performance capability: return the subset of requested ids that
+      # exists in `scope`, without loading complete records. Callers must fall back
+      # to #all for legacy stores that do not expose this method or leave it
+      # unimplemented, so adding it does not break custom MemoryStore adapters.
+      def existing_ids(scope:, ids:)
+        raise NotImplementedError, "#{self.class} does not implement #existing_ids"
+      end
+
       # Replace the content/embedding of an existing memory. Used by consolidation
       # (UPDATE). Returns the updated Record. Raises Engram::Error when the scoped
       # record does not exist or the replacement would move it to another scope.

@@ -49,6 +49,10 @@ module Engram
         query.map { |row| to_record(row) }
       end
 
+      def existing_ids(scope:, ids:)
+        model.where(scope: scope, id: ids).pluck(:id)
+      end
+
       def update(scope:, id:, record:)
         raise Engram::Error, "cannot move memory across scopes" unless record.scope == scope
 

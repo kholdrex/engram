@@ -7,8 +7,12 @@ module Engram
     # dumb pile of embeddings.
     # Implementations: Consolidators::HeuristicConsolidator, Consolidators::LLMConsolidator.
     module Consolidator
-      # Given Array<Record> candidates and a scope, return Array<Decision> (one per
-      # candidate that should result in an action).
+      # Given Array<Record> candidates and a scope, return Array<Decision> (at most one
+      # per candidate occurrence, including NOOP decisions). Each decision must reference
+      # the actual candidate instance from this array, not a copy or replacement. When the
+      # same instance occurs multiple times, it may have no more decisions than occurrences.
+      # Candidates are read-only reconciliation inputs: implementations must not mutate
+      # their state, including nested metadata or embedding values.
       def reconcile_all(candidates:, scope:)
         raise NotImplementedError, "#{self.class} must implement #reconcile_all"
       end

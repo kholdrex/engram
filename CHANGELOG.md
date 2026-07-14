@@ -27,8 +27,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   boundaries. The built-in LLM extractor does not emit grounded provenance.
 - Extractors must return an `Array`; each result may be a plain `Engram::Record` or an
   `Engram::Extraction` carrying provenance.
-- Custom consolidators must include the same-scope `Engram::Record` candidate that authorized
-  each `forget` decision. Missing, malformed, or cross-scope candidates now fail closed.
+- Custom consolidator decisions must reference the actual same-scope `Engram::Record` instance
+  supplied for reconciliation and must not mutate candidate state, including nested metadata or
+  embeddings; substituted, modified, missing, malformed, or cross-scope candidates fail closed.
+  `Observe` preflights the complete decision batch, including persistence policy and hook
+  transformations, before beginning store mutations.
 - `MemoryStore` mutations now require an explicit `scope:` and enforce the `(scope, id)` boundary
   for update, delete, and touch operations. Custom stores must adopt the new scoped signatures;
   `update` returns the updated record or raises `Engram::Error`, while delete and touch return an

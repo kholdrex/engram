@@ -44,6 +44,10 @@ module Engram
         records
       end
 
+      def existing_ids(scope:, ids:)
+        ids.uniq.select { |id| @records[id]&.scope == scope }
+      end
+
       def update(scope:, id:, record:)
         existing = @records[id]
         raise Engram::Error, "no memory with id #{id.inspect} in scope #{scope.inspect}" unless existing&.scope == scope

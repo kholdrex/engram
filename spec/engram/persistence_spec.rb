@@ -37,6 +37,16 @@ RSpec.describe Engram::Persistence do
     end
 
     context "with a custom persistence policy" do
+      it "validates malformed input before a policy can replace it" do
+        policy = instance_double(Proc)
+        expect(policy).not_to receive(:call)
+        persistence = described_class.new(store: store, embedder: Engram::Adapters::NullEmbedder.new,
+          persistence_policy: policy)
+
+        expect { persistence.add(record.with(metadata: malformed_provenance)) }
+          .to raise_error(Engram::Error, /malformed provenance/)
+      end
+
       it "fails closed when the policy returns malformed provenance" do
         policy = ->(candidate) { candidate.with(metadata: malformed_provenance) }
         persistence = described_class.new(
@@ -58,6 +68,27 @@ RSpec.describe Engram::Persistence do
 
         expect { persistence.add(record) }.to raise_error(Engram::Error, /unsupported provenance version 99/)
       end
+    end
+
+    it "validates future input before before_persist can strip it" do
+      hook = instance_double(Proc)
+      expect(hook).not_to receive(:call)
+      persistence = described_class.new(store: store, embedder: Engram::Adapters::NullEmbedder.new,
+        before_persist: hook, persistence_policy: nil)
+
+      expect { persistence.add(record.with(metadata: future_provenance)) }
+        .to raise_error(Engram::Error, /unsupported provenance version 99/)
+    end
+
+    it "validates provenance introduced by before_persist before policy can strip it" do
+      hook = ->(candidate) { candidate.with(metadata: future_provenance) }
+      policy = ->(candidate) { candidate.with(metadata: {}) }
+      persistence = described_class.new(store: store, embedder: Engram::Adapters::NullEmbedder.new,
+        before_persist: hook, persistence_policy: policy)
+
+      expect { persistence.add(record) }
+        .to raise_error(Engram::Error, /unsupported provenance version 99/)
+      expect(store.all(scope: record.scope)).to be_empty
     end
   end
 
@@ -138,6 +169,16 @@ RSpec.describe Engram::Persistence do
         candidate = record.with(metadata: future_provenance)
 
         expect { persistence.allowed?(candidate) }.to raise_error(Engram::Error, /unsupported provenance version 99/)
+      end
+
+      it "validates malformed authorization input before the policy can replace it" do
+        policy = instance_double(Proc)
+        expect(policy).not_to receive(:call)
+        persistence = described_class.new(store: store, embedder: Engram::Adapters::NullEmbedder.new,
+          persistence_policy: policy)
+
+        expect { persistence.allowed?(record.with(metadata: malformed_provenance)) }
+          .to raise_error(Engram::Error, /malformed provenance/)
       end
     end
   end
