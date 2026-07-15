@@ -127,6 +127,105 @@ RSpec.describe Engram::UseCases::Observe do
     end
   end
 
+  it "rejects a non-Array extractor result that overrides is_a? with a stable Engram error" do
+    output = Object.new
+    output.define_singleton_method(:is_a?) { |klass| klass.equal?(Array) || super(klass) }
+    consolidator = double
+    expect(consolidator).not_to receive(:reconcile_all)
+
+    expect do
+      described_class.new(store: store, extractor: double(extract: output), consolidator: consolidator)
+        .call(messages: ["turn"], scope: "u:1")
+    end.to raise_error(Engram::Error, /extractor must return an Array containing only/)
+    expect(store.all(scope: "u:1")).to be_empty
+  end
+
+  it "does not let Array map overrides skip extractor member normalization" do
+    subclass = Class.new(Array) do
+      def map(&_) = []
+    end
+    containers = [subclass.new([Object.new]), [Object.new]]
+    containers.last.define_singleton_method(:map) { |&_| [] }
+
+    containers.each do |output|
+      consolidator = double
+      expect(consolidator).not_to receive(:reconcile_all)
+
+      expect do
+        described_class.new(store: store, extractor: double(extract: output), consolidator: consolidator)
+          .call(messages: ["turn"], scope: "u:1")
+      end.to raise_error(Engram::Error, /extractor must return an Array containing only/)
+    end
+  end
+
+  it "does not let Array map overrides skip decision validation and canonicalization" do
+    candidate = Engram::Record.new(content: "Candidate", scope: "u:1", embedding: [0.0])
+    subclass = Class.new(Array) do
+      def map(&_) = []
+    end
+    containers = [subclass.new([Object.new]), [Object.new]]
+    containers.last.define_singleton_method(:map) { |&_| [] }
+
+    containers.each do |output|
+      observe = described_class.new(store: store, extractor: double(extract: [candidate]),
+        consolidator: double(reconcile_all: output), embedder: embedder)
+
+      expect { observe.call(messages: ["turn"], scope: "u:1") }
+        .to raise_error(Engram::Error, /consolidator must return an Array of Engram::Decision/)
+      expect(store.all(scope: "u:1")).to be_empty
+    end
+  end
+
+  it "rejects a non-Array consolidator result that overrides is_a? with a stable Engram error" do
+    candidate = Engram::Record.new(content: "Candidate", scope: "u:1", embedding: [0.0])
+    output = Object.new
+    output.define_singleton_method(:is_a?) { |klass| klass.equal?(Array) || super(klass) }
+    observe = described_class.new(store: store, extractor: double(extract: [candidate]),
+      consolidator: double(reconcile_all: output), embedder: embedder)
+
+    expect { observe.call(messages: ["turn"], scope: "u:1") }
+      .to raise_error(Engram::Error, /consolidator must return an Array of Engram::Decision/)
+    expect(store.all(scope: "u:1")).to be_empty
+  end
+
+  it "rejects a forged decision member that overrides is_a? before store mutation" do
+    candidate = Engram::Record.new(content: "Candidate", scope: "u:1", embedding: [0.0])
+    forged = Object.new
+    forged.define_singleton_method(:is_a?) { |klass| klass.equal?(Engram::Decision) || super(klass) }
+    forged.define_singleton_method(:action) { :add }
+    forged.define_singleton_method(:candidate) { candidate }
+    forged.define_singleton_method(:target_id) { nil }
+    forged.define_singleton_method(:reason) { "forged" }
+    observe = described_class.new(store: store, extractor: double(extract: [candidate]),
+      consolidator: double(reconcile_all: [forged]), embedder: embedder)
+
+    expect { observe.call(messages: ["turn"], scope: "u:1") }
+      .to raise_error(Engram::Error, "consolidator must return an Array of Engram::Decision values")
+    expect(store.all(scope: "u:1")).to be_empty
+  end
+
+  it "does not let Array map overrides bypass target ID canonicalization" do
+    candidate = Engram::Record.new(content: "Replacement", scope: "u:1", embedding: [0.0])
+    expect(store).not_to receive(:update)
+
+    2.times do |index|
+      target_id = +"victim"
+      target_id.define_singleton_method(:to_s) { "behavior-bearing" }
+      decision = Engram::Decision.new(action: :update, candidate: candidate, target_id: target_id)
+      output = if index.zero?
+        Class.new(Array) { define_method(:map) { |&_| [decision] } }.new([decision])
+      else
+        [decision].tap { |values| values.define_singleton_method(:map) { |&_| [decision] } }
+      end
+      observe = described_class.new(store: store, extractor: double(extract: [candidate]),
+        consolidator: double(reconcile_all: output), embedder: embedder)
+
+      expect { observe.call(messages: ["turn"], scope: "u:1") }
+        .to raise_error(Engram::Error, "decision target_id must be a plain String or Integer")
+      expect(store.all(scope: "u:1")).to be_empty
+    end
+  end
+
   it "rejects extracted add candidates with supplied IDs before they can overwrite scoped records" do
     victims = [
       store.add(Engram::Record.new(content: "Same scope", scope: "u:1", embedding: [0.0])),

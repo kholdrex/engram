@@ -87,11 +87,11 @@ module Engram
       end
 
       def normalize_extractions(results)
-        unless results.is_a?(Array)
+        unless core_array?(results)
           raise Engram::Error, "extractor must return an Array containing only Engram::Record or Engram::Extraction values"
         end
 
-        results.map do |result|
+        core_array_map(results) do |result|
           candidate = case result
           when Engram::Record then normalize_record(result)
           when Engram::Extraction then normalize_record(result.to_record)
@@ -165,12 +165,12 @@ module Engram
       end
 
       def canonicalize_decisions(raw_decisions)
-        unless raw_decisions.is_a?(Array)
+        unless core_array?(raw_decisions)
           raise Engram::Error, "consolidator must return an Array of Engram::Decision values"
         end
 
-        raw_decisions.map do |raw_decision|
-          unless raw_decision.is_a?(Engram::Decision)
+        core_array_map(raw_decisions) do |raw_decision|
+          unless Object.instance_method(:is_a?).bind_call(raw_decision, Engram::Decision)
             raise Engram::Error, "consolidator must return an Array of Engram::Decision values"
           end
 
@@ -184,6 +184,20 @@ module Engram
 
           Engram::Decision.new(action: action, candidate: candidate, target_id: target_id, reason: reason)
         end
+      end
+
+      # Array subclasses are supported, but checks and traversal at an untrusted
+      # return boundary must not dispatch through singleton or subclass behavior.
+      def core_array?(value)
+        Object.instance_method(:is_a?).bind_call(value, Array)
+      rescue TypeError
+        false
+      end
+
+      def core_array_map(values)
+        mapped = []
+        Array.instance_method(:each).bind_call(values) { |value| mapped << yield(value) }
+        mapped
       end
 
       def canonical_target_id(target_id)

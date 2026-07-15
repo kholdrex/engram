@@ -29,6 +29,40 @@ RSpec.describe Engram::Persistence do
     )
   end
 
+  def hostile_string_class
+    Class.new(String) do
+      class << self
+        attr_accessor :hostile
+      end
+
+      def to_s = self.class.hostile ? raise("hostile to_s") : super
+      def ==(other) = self.class.hostile ? raise("hostile ==") : super
+      def eql?(other) = self.class.hostile ? raise("hostile eql?") : super
+      def hash = self.class.hostile ? raise("hostile hash") : super
+    end
+  end
+
+  def aliased_provenance(payload, outer_alias:, nested_alias:)
+    string_class = hostile_string_class
+    outer_key = string_class.new("_engram")
+    nested_key = string_class.new("provenance")
+    metadata = {
+      (outer_alias ? outer_key : "_engram") => {
+        (nested_alias ? nested_key : "provenance") => payload
+      }
+    }
+    string_class.hostile = true
+    metadata
+  end
+
+  def excessively_nested_provenance(container_type)
+    nested = "leaf"
+    101.times do
+      nested = (container_type == :hash) ? {"nested" => nested} : [nested]
+    end
+    {"_engram" => {"provenance" => provenance.to_h.merge("extension" => nested)}}
+  end
+
   describe "#add" do
     context "without a persistence policy" do
       let(:policy) { nil }
@@ -43,6 +77,127 @@ RSpec.describe Engram::Persistence do
         candidate = record.with(metadata: future_provenance)
 
         expect { persistence.add(candidate) }.to raise_error(Engram::Error, /unsupported provenance version 99/)
+      end
+
+      it "rejects invalid-encoding provenance without mutating the store" do
+        existing = store.add(Engram::Record.new(content: "Existing", scope: record.scope))
+        original = store.all(scope: record.scope).map(&:to_h)
+        payload = provenance.to_h
+        payload.dig("sources", 0)["alignment"] = (+"ungrounded\xff").force_encoding("UTF-8")
+        candidate = record.with(metadata: {"_engram" => {"provenance" => payload}})
+
+        expect { persistence.add(candidate) }
+          .to raise_error(Engram::Error, "malformed provenance: String values must have valid encoding")
+        expect(store.all(scope: record.scope).map(&:to_h)).to eq(original)
+        expect(store.all(scope: record.scope)).to eq([existing])
+      end
+
+      it "rejects invalid-encoding optional provenance before mutating the store" do
+        existing = store.add(Engram::Record.new(content: "Existing", scope: record.scope))
+        original = store.all(scope: record.scope).map(&:to_h)
+        payload = provenance.to_h
+        payload.fetch("extractor")["provider"] = (+"provider\xff").force_encoding("UTF-8")
+        candidate = record.with(metadata: {"_engram" => {"provenance" => payload}})
+
+        expect { persistence.add(candidate) }
+          .to raise_error(Engram::Error, "malformed provenance: String values must have valid encoding")
+        expect(store.all(scope: record.scope).map(&:to_h)).to eq(original)
+        expect(store.all(scope: record.scope)).to eq([existing])
+      end
+
+      it "does not mutate the store when direct persistence receives excessively nested provenance" do
+        existing = store.add(Engram::Record.new(content: "Existing", scope: record.scope))
+        original = store.all(scope: record.scope).map(&:to_h)
+
+        %i[hash array].each do |container_type|
+          candidate = record.with(metadata: excessively_nested_provenance(container_type))
+
+          expect { persistence.add(candidate) }
+            .to raise_error(Engram::Error, /nesting exceeds maximum depth of 100/)
+          expect(store.all(scope: record.scope).map(&:to_h)).to eq(original)
+        end
+        expect(store.all(scope: record.scope)).to eq([existing])
+      end
+
+      it "fails closed on invalid provenance hidden behind hostile String subclass aliases" do
+        cases = [
+          [aliased_provenance({"version" => 99}, outer_alias: true, nested_alias: false), /unsupported provenance version 99/],
+          [aliased_provenance({"version" => 1, "sources" => []}, outer_alias: false, nested_alias: true), /malformed provenance/]
+        ]
+        cases.each do |metadata, error|
+          expect { persistence.add(record.with(metadata: metadata)) }
+            .to raise_error(Engram::Error, error)
+        end
+        expect(store.all(scope: record.scope)).to be_empty
+      end
+
+      it "does not let a behavior-bearing metadata Hash hide malformed provenance" do
+        metadata_class = Class.new(Hash) do
+          def key?(_key) = false
+          def [](_key) = nil
+          def select!(&_) = clear
+          def reduce(initial, &_) = initial
+        end
+        metadata = metadata_class.new.update(future_provenance)
+
+        expect { persistence.add(record.with(metadata: metadata)) }
+          .to raise_error(Engram::Error, /unsupported provenance version 99/)
+        expect(store.all(scope: record.scope)).to be_empty
+      end
+
+      it "does not let nested traversal overrides launder ungrounded provenance" do
+        ungrounded = provenance(alignment: :ungrounded).to_h
+        grounded_sources = provenance.to_h.fetch("sources")
+        payload_class = Class.new(Hash) do
+          define_method(:[]) do |key|
+            if key == "sources"
+              grounded_sources
+            else
+              super(key)
+            end
+          end
+        end
+        payload = payload_class.new.update(ungrounded)
+        candidate = record.with(metadata: {"_engram" => {"provenance" => payload}})
+        persistence = described_class.new(store: store, embedder: Engram::Adapters::NullEmbedder.new,
+          persistence_policy: Engram::PersistencePolicy.new)
+
+        expect(persistence.add(candidate)).to be_nil
+        expect(store.all(scope: record.scope)).to be_empty
+      end
+
+      it "does not let nested each_pair overrides launder ungrounded provenance" do
+        grounded_source = provenance.to_h.fetch("sources").first
+        source_class = Class.new(Hash) do
+          define_method(:each_pair) do |&block|
+            return enum_for(:each_pair) unless block
+
+            grounded_source.each_pair(&block)
+          end
+        end
+        ungrounded_source = provenance(alignment: :ungrounded).to_h.fetch("sources").first
+        ungrounded_source = source_class.new.update(ungrounded_source)
+        payload = provenance.to_h.merge("sources" => [ungrounded_source])
+        candidate = record.with(metadata: {"_engram" => {"provenance" => payload}})
+        persistence = described_class.new(store: store, embedder: Engram::Adapters::NullEmbedder.new,
+          persistence_policy: Engram::PersistencePolicy.new)
+
+        expect(persistence.add(candidate)).to be_nil
+        expect(store.all(scope: record.scope)).to be_empty
+      end
+
+      it "does not let a String subclass launder ungrounded provenance" do
+        alignment_class = Class.new(String) do
+          def to_sym = :exact
+        end
+        payload = provenance(alignment: :ungrounded).to_h
+        payload.fetch("sources").first["alignment"] = alignment_class.new("ungrounded")
+        candidate = record.with(metadata: {"_engram" => {"provenance" => payload}})
+        persistence = described_class.new(store: store, embedder: Engram::Adapters::NullEmbedder.new,
+          persistence_policy: Engram::PersistencePolicy.new)
+
+        expect(persistence.add(candidate)).to be_nil
+        expect(store.all(scope: record.scope)).to be_empty
       end
     end
 
@@ -155,6 +310,55 @@ RSpec.describe Engram::Persistence do
       it "fails closed on future provenance" do
         original = stored_record.to_h
         candidate = stored_record.with(content: "User likes coffee", metadata: future_provenance)
+
+        expect {
+          persistence.update(scope: candidate.scope, id: stored_record.id, record: candidate)
+        }.to raise_error(Engram::Error, /unsupported provenance version 99/)
+        expect(store.all(scope: stored_record.scope).map(&:to_h)).to eq([original])
+      end
+
+      it "fails closed on hostile String subclass aliases during direct updates" do
+        original = stored_record.to_h
+
+        cases = [
+          [aliased_provenance({"version" => 99}, outer_alias: true, nested_alias: false), /unsupported provenance version 99/],
+          [aliased_provenance({"version" => 1, "sources" => []}, outer_alias: false, nested_alias: true), /malformed provenance/]
+        ]
+        cases.each do |metadata, error|
+          candidate = stored_record.with(content: "User likes coffee", metadata: metadata)
+          expect {
+            persistence.update(scope: candidate.scope, id: stored_record.id, record: candidate)
+          }.to raise_error(Engram::Error, error)
+        end
+        expect(store.all(scope: stored_record.scope).map(&:to_h)).to eq([original])
+      end
+
+      it "does not let a Hash subclass hide malformed provenance on direct updates" do
+        original = stored_record.to_h
+        metadata_class = Class.new(Hash) do
+          def key?(_key) = false
+          def [](_key) = nil
+        end
+        candidate = stored_record.with(content: "User likes coffee",
+          metadata: metadata_class.new.update(future_provenance))
+
+        expect {
+          persistence.update(scope: candidate.scope, id: stored_record.id, record: candidate)
+        }.to raise_error(Engram::Error, /unsupported provenance version 99/)
+        expect(store.all(scope: stored_record.scope).map(&:to_h)).to eq([original])
+      end
+
+      it "does not let a nested each_pair override hide future provenance on direct updates" do
+        original = stored_record.to_h
+        presented = provenance.to_h
+        payload = provenance.to_h.merge("version" => 99)
+        payload.define_singleton_method(:each_pair) do |&block|
+          return enum_for(:each_pair) unless block
+
+          presented.each_pair(&block)
+        end
+        candidate = stored_record.with(content: "User likes coffee",
+          metadata: {"_engram" => {"provenance" => payload}})
 
         expect {
           persistence.update(scope: candidate.scope, id: stored_record.id, record: candidate)
