@@ -23,8 +23,8 @@ RSpec.describe "gem packaging" do
     expect(spec.files).to include("lib/engram/rails/tasks.rake")
   end
 
-  it "declares no hard runtime dependencies" do
-    expect(spec.runtime_dependencies).to be_empty
+  it "declares BigDecimal as its only hard runtime dependency" do
+    expect(spec.runtime_dependencies.map(&:name)).to contain_exactly("bigdecimal")
   end
 
   it "ships only the documented top-level files alongside Ruby sources" do

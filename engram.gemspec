@@ -31,7 +31,9 @@ Gem::Specification.new do |spec|
   spec.files = Dir.glob("lib/**/*.{rb,tt,rake}") + %w[README.md LICENSE.txt CHANGELOG.md]
   spec.require_paths = ["lib"]
 
-  # NOTE: deliberately zero hard runtime dependencies — the pure core needs nothing.
+  spec.add_dependency "bigdecimal"
+
+  # BigDecimal is the core's only hard runtime dependency.
   # Optional integrations require their own gems in the host app:
   #   * Engram::Adapters::PgvectorStore  => add `neighbor` and ActiveRecord
   #   * Engram::Adapters::RubyLLMEmbedder => add `ruby_llm`
