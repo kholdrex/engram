@@ -49,8 +49,8 @@ module Engram
               next []
             end
 
-            decisions = consolidate(candidates: candidates, scope: scope)
-            operations = preflight(decisions, candidates, scope)
+            decisions, candidate_budget, detached_by_candidate = consolidate(candidates: candidates, scope: scope)
+            operations = preflight(decisions, candidate_budget, detached_by_candidate, scope)
             applied_decisions = operations.filter_map { |operation| apply(operation, scope) }
             payload[:decision_count] = applied_decisions.size
             payload[:decision_actions] = applied_decisions.map { |decision| decision.action.to_s }
@@ -109,13 +109,15 @@ module Engram
         payload = Engram::Instrumentation.payload(scope: scope, store: @store, candidate_count: candidates.size)
         Engram::Instrumentation.instrument("consolidate", payload) do
           candidate_snapshot = snapshot_candidates(candidates)
+          detached_candidates = detach_candidates(candidates)
+          candidate_budget, detached_by_candidate = candidate_context(candidates, detached_candidates)
           raw_decisions = @consolidator.reconcile_all(candidates: candidates, scope: scope)
           decisions = canonicalize_decisions(raw_decisions)
           verify_candidates!(candidates, candidate_snapshot)
 
           payload[:decision_count] = decisions.size
           payload[:decision_actions] = decisions.map { |decision| decision.action.to_s }
-          decisions
+          [decisions, candidate_budget, detached_by_candidate]
         end
       end
 
@@ -129,6 +131,22 @@ module Engram
         candidate_integrity.verify!(candidates, snapshot)
       rescue Engram::Internal::CandidateIntegrity::Error => error
         raise Engram::Error, error.message
+      end
+
+      def detach_candidates(candidates)
+        candidates.map { |candidate| candidate_integrity.detach(candidate) }
+      rescue Engram::Internal::CandidateIntegrity::Error => error
+        raise Engram::Error, error.message
+      end
+
+      def candidate_context(candidates, detached_candidates)
+        candidate_budget = Hash.new(0).compare_by_identity
+        detached_by_candidate = {}.compare_by_identity
+        candidates.zip(detached_candidates) do |candidate, detached|
+          candidate_budget[candidate] += 1
+          detached_by_candidate[candidate] ||= detached
+        end
+        [candidate_budget, detached_by_candidate]
       end
 
       def candidate_integrity
@@ -202,10 +220,9 @@ module Engram
         end
       end
 
-      def preflight(decisions, candidates, scope)
-        candidate_budget = Hash.new(0).compare_by_identity
-        Array.instance_method(:each).bind_call(candidates) { |candidate| candidate_budget[candidate] += 1 }
+      def preflight(decisions, candidate_budget, detached_by_candidate, scope)
         decision_counts = Hash.new(0).compare_by_identity
+        safe_decisions = []
 
         decisions.each do |decision|
           unless decision.is_a?(Engram::Decision)
@@ -214,7 +231,7 @@ module Engram
           unless Engram::Decision::ACTIONS.include?(decision.action)
             raise Engram::Error, "unsupported decision action #{decision.action.inspect}"
           end
-          unless decision.candidate.is_a?(Engram::Record)
+          unless Object.instance_method(:is_a?).bind_call(decision.candidate, Engram::Record)
             message = if decision.action == :forget
               "forget decision candidate must be an Engram::Record"
             else
@@ -231,19 +248,24 @@ module Engram
               "consolidator must return no more than one decision per candidate occurrence; " \
               "multiple decisions reference the same candidate"
           end
-          raise Engram::Error, "cannot move memory across scopes" unless decision.candidate.scope == scope
+          detached_candidate = detached_by_candidate.fetch(decision.candidate)
+          raise Engram::Error, "cannot move memory across scopes" unless detached_candidate.scope == scope
 
           if %i[update forget].include?(decision.action) && !decision.target_id
             raise Engram::Error, "#{decision.action} decision requires a target_id"
           end
 
           if %i[add update forget].include?(decision.action)
-            Engram::Provenance.extract_for_persistence(decision.candidate.metadata)
+            Engram::Provenance.extract_for_persistence(detached_candidate.metadata)
           end
+          safe_decisions << Engram::Decision.new(action: decision.action, candidate: detached_candidate,
+            target_id: decision.target_id, reason: decision.reason)
         end
 
-        preflight_destructive_targets!(decisions, scope)
-        decisions.map { |decision| prepare_operation(decision, scope) }
+        preflight_destructive_targets!(safe_decisions, scope)
+        decisions.zip(safe_decisions).map do |result_decision, safe_decision|
+          prepare_operation(safe_decision, scope, result_decision)
+        end
       end
 
       def preflight_destructive_targets!(decisions, scope)
@@ -277,7 +299,7 @@ module Engram
         @store.all(scope: scope).map(&:id)
       end
 
-      def prepare_operation(decision, scope)
+      def prepare_operation(decision, scope, result_decision)
         prepared = case decision.action
         when :add
           persistence.prepare(decision.candidate)
@@ -291,23 +313,23 @@ module Engram
           raise Engram::Error, "cannot move memory across scopes"
         end
 
-        [decision, prepared]
+        [result_decision, decision, prepared]
       end
 
       def apply(operation, scope)
-        decision, prepared = operation
+        result_decision, decision, prepared = operation
         case decision.action
         when :add
-          decision if prepared && persistence.add_prepared(prepared, scope: scope)
+          result_decision if prepared && persistence.add_prepared(prepared, scope: scope)
         when :update
           if decision.target_id && prepared &&
               persistence.update_prepared(scope: scope, id: decision.target_id, record: prepared)
-            decision
+            result_decision
           end
         when :forget
           if decision.target_id && prepared
             deleted = @store.delete(scope: scope, id: decision.target_id)
-            decision if deleted && deleted != 0
+            result_decision if deleted && deleted != 0
           end
         when :noop
           nil

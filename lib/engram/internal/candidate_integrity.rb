@@ -58,7 +58,55 @@ module Engram
         raise MutationError, CANDIDATE_MUTATION_MESSAGE, error.backtrace
       end
 
+      # Returns a deep, behavior-free copy whose nested state shares no mutable
+      # references with the candidate supplied to an untrusted consolidator.
+      def detach(candidate)
+        snapshot_record(candidate)
+        attributes = RECORD_STATE_READERS.to_h do |attribute, reader|
+          [attribute, duplicate_value(reader.bind_call(candidate))]
+        end
+        Engram::Record.new(**attributes)
+      end
+
       private
+
+      def duplicate_value(value, active = {}.compare_by_identity)
+        value_class = plain_class(value)
+        if custom_behavior?(value, value_class) || !Object.instance_method(:instance_variables).bind_call(value).empty?
+          raise InvalidStateError, "unsupported candidate value"
+        end
+
+        if value_class.equal?(String) || value_class.equal?(Time)
+          Object.instance_method(:dup).bind_call(value)
+        elsif value_class.equal?(Array)
+          with_acyclic_value(value, active) do
+            copy = []
+            Array.instance_method(:each).bind_call(value) { |element| copy << duplicate_value(element, active) }
+            copy
+          end
+        elsif value_class.equal?(Hash)
+          duplicate_hash(value, active)
+        else
+          # The remaining supported scalar values are immutable.
+          canonical_value(value, active)
+          value
+        end
+      end
+
+      def duplicate_hash(value, active)
+        default_proc = Hash.instance_method(:default_proc).bind_call(value)
+        raise InvalidStateError, "unsupported candidate value Hash with a default proc" if default_proc
+
+        with_acyclic_value(value, active) do
+          copy = {}
+          copy.compare_by_identity if Hash.instance_method(:compare_by_identity?).bind_call(value)
+          Hash.instance_method(:each_pair).bind_call(value) do |key, nested_value|
+            copy[duplicate_value(key, active)] = duplicate_value(nested_value, active)
+          end
+          copy.default = duplicate_value(Hash.instance_method(:default).bind_call(value), active)
+          copy
+        end
+      end
 
       def snapshot_collection(candidates)
         unless Object.instance_method(:instance_of?).bind_call(candidates, Array) &&

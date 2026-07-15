@@ -337,6 +337,30 @@ RSpec.describe Engram::UseCases::Observe do
     expect(store.all(scope: "u:1")).to eq([target])
   end
 
+  it "uses a detached candidate when a consolidator mutates its retained reference after returning" do
+    target = store.add(Engram::Record.new(content: "Old", scope: "u:1", embedding: [0.0]))
+    candidate = Engram::Record.new(content: "Ungrounded correction", scope: "u:1", embedding: [0.0],
+      metadata: Engram::Provenance.attach({}, provenance(alignment: :ungrounded)))
+    retained_candidate = nil
+    consolidator = Object.new
+    consolidator.define_singleton_method(:reconcile_all) do |candidates:, scope:|
+      retained_candidate = candidates.first
+      [Engram::Decision.new(action: :forget, candidate: retained_candidate, target_id: target.id)]
+    end
+    allow(store).to receive(:existing_ids) do |scope:, ids:|
+      retained_candidate.metadata.dig("_engram", "provenance", "sources").first["alignment"] = "exact"
+      ids
+    end
+
+    applied = described_class.new(store: store, extractor: double(extract: [candidate]),
+      consolidator: consolidator, embedder: embedder)
+      .call(messages: ["turn"], scope: "u:1")
+
+    expect(applied).to be_empty
+    expect(store.all(scope: "u:1")).to eq([target])
+    expect(Engram::Provenance.extract(candidate.metadata).sources.first.alignment).to eq(:exact)
+  end
+
   it "rejects deferred candidate mutation by a decision accessor before applying anything" do
     target = store.add(Engram::Record.new(content: "Old", scope: "u:1", embedding: [0.0]))
     first = Engram::Record.new(content: "Safe", scope: "u:1", embedding: [0.0])
@@ -488,7 +512,7 @@ RSpec.describe Engram::UseCases::Observe do
     second = Engram::Record.new(content: "Malformed later", scope: "u:1", embedding: [0.0])
     malformed = {"_engram" => {"provenance" => {"version" => 99}}}
     Engram.config.before_persist = lambda do |candidate|
-      candidate.equal?(second) ? candidate.with(metadata: malformed) : candidate
+      (candidate.content == second.content) ? candidate.with(metadata: malformed) : candidate
     end
     decisions = [first, second].map { |candidate| Engram::Decision.new(action: :add, candidate: candidate) }
     observe = described_class.new(store: store, extractor: double(extract: [first, second]),
