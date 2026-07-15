@@ -52,7 +52,7 @@ chat.ask("Why am I being rate limited?")
 
 ## Feature overview
 
-- Zero-dependency pure Ruby core with in-memory defaults for tests and local development.
+- Pure Ruby core with BigDecimal as its only runtime dependency and in-memory defaults for tests and local development.
 - Rails `has_memory` macro, install generator, and background `observe_later` job.
 - Postgres + pgvector storage through an optional ActiveRecord/neighbor adapter.
 - RubyLLM embedder and completion adapters for provider-backed embeddings and extraction.
@@ -103,7 +103,7 @@ Use `CHANGELOG.md` as the authoritative source for breaking/compatibility change
 gem "engram"
 ```
 
-The core has **zero runtime dependencies**. Optional adapters need host-app dependencies:
+The core depends only on BigDecimal and does not require Rails, ActiveRecord, or a database. Optional adapters need host-app dependencies:
 
 - `Engram::Adapters::PgvectorStore` → ActiveRecord + `neighbor` + Postgres/pgvector
 - `Engram::Adapters::RubyLLMEmbedder` and `Engram::Adapters::RubyLLMCompletion` → `ruby_llm`
