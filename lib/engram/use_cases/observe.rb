@@ -114,6 +114,7 @@ module Engram
           verify_candidates_unchanged!(candidate_snapshots)
 
           payload[:decision_count] = decisions.size
+          payload[:decision_actions] = decisions.map { |decision| decision.action.to_s }
           decisions
         end
       end
@@ -205,7 +206,9 @@ module Engram
             raise Engram::Error, "#{decision.action} decision requires a target_id"
           end
 
-          Engram::Provenance.extract_for_persistence(decision.candidate.metadata)
+          if %i[add update forget].include?(decision.action)
+            Engram::Provenance.extract_for_persistence(decision.candidate.metadata)
+          end
         end
 
         preflight_destructive_targets!(decisions, scope)

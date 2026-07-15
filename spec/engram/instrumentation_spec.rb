@@ -75,14 +75,20 @@ RSpec.describe "Engram instrumentation" do
 
     expect(decisions.map(&:action)).to eq([:add])
     expect(events.map(&:first)).to eq(["observe.engram", "extract.engram", "consolidate.engram"])
-    expect(events.map(&:last)).to include(
-      include(scope_identifier: "u:1", store_adapter: "Engram::Adapters::InMemoryStore",
-        message_count: 1, idempotency_key_present: true, candidate_count: 1,
-        decision_count: 1, decision_actions: ["add"], duration_ms: be_a(Float).or(be_a(Integer))),
-      include(scope_identifier: "u:1", store_adapter: "Engram::Adapters::InMemoryStore",
-        message_count: 1, candidate_count: 1, duration_ms: be_a(Float).or(be_a(Integer))),
-      include(scope_identifier: "u:1", store_adapter: "Engram::Adapters::InMemoryStore",
-        candidate_count: 1, decision_count: 1, decision_actions: ["add"], duration_ms: be_a(Float).or(be_a(Integer)))
+    event_payloads = events.to_h
+    expect(event_payloads.fetch("observe.engram")).to include(
+      scope_identifier: "u:1", store_adapter: "Engram::Adapters::InMemoryStore",
+      message_count: 1, idempotency_key_present: true, candidate_count: 1,
+      decision_count: 1, decision_actions: ["add"], duration_ms: be_a(Float).or(be_a(Integer))
+    )
+    expect(event_payloads.fetch("extract.engram")).to include(
+      scope_identifier: "u:1", store_adapter: "Engram::Adapters::InMemoryStore",
+      message_count: 1, candidate_count: 1, duration_ms: be_a(Float).or(be_a(Integer))
+    )
+    expect(event_payloads.fetch("consolidate.engram")).to include(
+      scope_identifier: "u:1", store_adapter: "Engram::Adapters::InMemoryStore",
+      candidate_count: 1, decision_count: 1, decision_actions: ["add"],
+      duration_ms: be_a(Float).or(be_a(Integer))
     )
     expect(events.flat_map { |_name, payload| payload.values }.join(" ")).not_to include("tea")
   end

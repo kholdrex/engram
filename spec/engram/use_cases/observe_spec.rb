@@ -72,6 +72,27 @@ RSpec.describe Engram::UseCases::Observe do
     expect(observe.call(messages: ["turn"], scope: "u:1", idempotency_key: "turn-1")).to eq([])
   end
 
+  it "accepts noop decisions with malformed or future provenance and completes their claims" do
+    metadata_values = [
+      {"_engram" => {"provenance" => {"version" => 1, "sources" => []}}},
+      {"_engram" => {"provenance" => {"version" => 99}}}
+    ]
+
+    metadata_values.each_with_index do |metadata, index|
+      candidate = Engram::Record.new(content: "Candidate", scope: "u:1", embedding: [0.0], metadata: metadata)
+      extractor = double(extract: [candidate])
+      decision = Engram::Decision.new(action: :noop, candidate: candidate)
+      processed = Engram::Adapters::InMemoryProcessedTurns.new
+      observe = described_class.new(store: store, extractor: extractor,
+        consolidator: double(reconcile_all: [decision]), processed_turns: processed, embedder: embedder)
+      key = "noop-#{index}"
+
+      expect(observe.call(messages: ["turn"], scope: "u:1", idempotency_key: key)).to eq([])
+      expect(observe.call(messages: ["turn"], scope: "u:1", idempotency_key: key)).to eq([])
+      expect(extractor).to have_received(:extract).once
+    end
+  end
+
   it "validates only a forget decision's candidate without invoking write hooks" do
     malformed_target = store.add(Engram::Record.new(content: "Old", scope: "u:1", embedding: [0.0],
       metadata: {"_engram" => {"provenance" => {"version" => 99}}}))
