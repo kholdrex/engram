@@ -300,6 +300,70 @@ RSpec.describe Engram::UseCases::Observe do
     expect(store.all(scope: "u:1")).to eq([target])
   end
 
+  it "rejects a behavior-bearing target_id before it can mutate verified provenance or authorize deletion" do
+    target = store.add(Engram::Record.new(content: "Old", scope: "u:1", id: "victim", embedding: [0.0]))
+    candidate = Engram::Record.new(content: "Ungrounded correction", scope: "u:1", embedding: [0.0],
+      metadata: Engram::Provenance.attach({}, provenance(alignment: :ungrounded)))
+    target_id = +"victim"
+    target_id.define_singleton_method(:hash) do
+      candidate.metadata.dig("_engram", "provenance", "sources").first["alignment"] = "exact"
+      super()
+    end
+    decision = Engram::Decision.new(action: :forget, candidate: candidate, target_id: target_id)
+    observe = described_class.new(store: store, extractor: double(extract: [candidate]),
+      consolidator: double(reconcile_all: [decision]), embedder: embedder)
+
+    expect { observe.call(messages: ["turn"], scope: "u:1") }
+      .to raise_error(Engram::Error, /target_id/)
+    expect(Engram::Provenance.extract(candidate.metadata).sources.first.alignment).to eq(:ungrounded)
+    expect(store.all(scope: "u:1")).to eq([target])
+  end
+
+  it "rejects target_id subclasses, custom state, and coercible objects without invoking them" do
+    calls = 0
+    string_subclass = Class.new(String) do
+      define_method(:eql?) do |other|
+        calls += 1
+        super(other)
+      end
+    end
+    coercible = Object.new
+    coercible.define_singleton_method(:to_str) do
+      calls += 1
+      "victim"
+    end
+    stateful = +"victim"
+    stateful.instance_variable_set(:@payload, true)
+
+    [string_subclass.new("victim"), coercible, stateful].each do |target_id|
+      candidate = Engram::Record.new(content: "Correction", scope: "u:1", embedding: [0.0])
+      decision = Engram::Decision.new(action: :forget, candidate: candidate, target_id: target_id)
+      observe = described_class.new(store: store, extractor: double(extract: [candidate]),
+        consolidator: double(reconcile_all: [decision]), embedder: embedder)
+
+      expect { observe.call(messages: ["turn"], scope: "u:1") }
+        .to raise_error(Engram::Error, /target_id must be a plain String or Integer/)
+    end
+
+    expect(calls).to eq(0)
+  end
+
+  it "preserves plain String target IDs" do
+    store.add(Engram::Record.new(content: "Old", scope: "u:1", id: "victim", embedding: [0.0]))
+    candidate = Engram::Record.new(content: "Correction", scope: "u:1", embedding: [0.0],
+      metadata: Engram::Provenance.attach({}, provenance))
+    decision = Engram::Decision.new(action: :forget, candidate: candidate, target_id: +"victim")
+
+    applied = described_class.new(store: store, extractor: double(extract: [candidate]),
+      consolidator: double(reconcile_all: [decision]), embedder: embedder)
+      .call(messages: ["turn"], scope: "u:1")
+
+    expect(applied.map(&:action)).to eq([:forget])
+    expect(applied.first.target_id).to eq("victim")
+    expect(applied.first.target_id).not_to equal(decision.target_id)
+    expect(store.all(scope: "u:1")).to be_empty
+  end
+
   it "reads each untrusted decision accessor once and uses only canonical values afterward" do
     candidate = Engram::Record.new(content: "Safe", scope: "u:1", embedding: [0.0])
     changing_decision = Class.new(Engram::Decision) do

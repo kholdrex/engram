@@ -143,13 +143,59 @@ module Engram
 
           action = raw_decision.action
           candidate = raw_decision.candidate
-          target_id = raw_decision.target_id
+          target_id = canonical_target_id(raw_decision.target_id)
           reason = raw_decision.reason
           unless Engram::Decision::ACTIONS.include?(action)
             raise Engram::Error, "unsupported decision action #{action.inspect}"
           end
 
           Engram::Decision.new(action: action, candidate: candidate, target_id: target_id, reason: reason)
+        end
+      end
+
+      def canonical_target_id(target_id)
+        return if BasicObject.instance_method(:equal?).bind_call(target_id, nil)
+        return false if BasicObject.instance_method(:equal?).bind_call(target_id, false)
+
+        target_class = Object.instance_method(:class).bind_call(target_id)
+        valid_class = target_class.equal?(Integer) || target_class.equal?(String)
+        valid_state = Object.instance_method(:instance_variables).bind_call(target_id).empty?
+        unless valid_class && valid_state
+          raise Engram::Error, "decision target_id must be a plain String or Integer"
+        end
+
+        return target_id if target_class.equal?(Integer)
+
+        if custom_behavior?(target_id, target_class)
+          raise Engram::Error, "decision target_id must be a plain String or Integer"
+        end
+
+        String.instance_method(:dup).bind_call(target_id)
+      rescue TypeError
+        raise Engram::Error, "decision target_id must be a plain String or Integer"
+      end
+
+      def custom_behavior?(value, value_class)
+        singleton_class = Object.instance_method(:singleton_class).bind_call(value)
+        return false if singleton_class.equal?(value_class)
+
+        method_visibilities = %i[
+          public_instance_methods protected_instance_methods private_instance_methods
+        ]
+        return true if method_visibilities.any? do |visibility|
+          Module.instance_method(visibility).bind_call(singleton_class, false).any?
+        end
+
+        singleton_ancestors = Module.instance_method(:ancestors).bind_call(singleton_class)
+        class_ancestors = Module.instance_method(:ancestors).bind_call(value_class)
+        return true unless singleton_ancestors.length == class_ancestors.length + 1 &&
+          class_ancestors.each_with_index.all? { |ancestor, index| singleton_ancestors[index + 1].equal?(ancestor) }
+
+        method_visibilities.any? do |visibility|
+          singleton_methods = Module.instance_method(visibility).bind_call(singleton_class, true)
+          class_methods = Module.instance_method(visibility).bind_call(value_class, true)
+          singleton_methods.length != class_methods.length ||
+            singleton_methods.any? { |method_name| !class_methods.include?(method_name) }
         end
       end
 

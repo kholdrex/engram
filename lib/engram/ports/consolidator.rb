@@ -12,7 +12,8 @@ module Engram
       # the actual candidate instance from this array, not a copy or replacement. When the
       # same instance occurs multiple times, it may have no more decisions than occurrences.
       # Candidates are read-only reconciliation inputs: implementations must not mutate
-      # their state, including nested metadata or embedding values.
+      # their state, including nested metadata or embedding values. Decision target IDs
+      # must be plain String or Integer values without singleton behavior or custom state.
       def reconcile_all(candidates:, scope:)
         raise NotImplementedError, "#{self.class} must implement #reconcile_all"
       end
