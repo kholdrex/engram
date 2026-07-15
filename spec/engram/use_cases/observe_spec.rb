@@ -319,6 +319,17 @@ RSpec.describe Engram::UseCases::Observe do
     expect(store.all(scope: "u:1")).to eq([target])
   end
 
+  it "rejects false target IDs on non-destructive decisions before applying them" do
+    candidate = Engram::Record.new(content: "Candidate", scope: "u:1", embedding: [0.0])
+    decision = Engram::Decision.new(action: :add, candidate: candidate, target_id: false)
+    observe = described_class.new(store: store, extractor: double(extract: [candidate]),
+      consolidator: double(reconcile_all: [decision]), embedder: embedder)
+
+    expect { observe.call(messages: ["turn"], scope: "u:1") }
+      .to raise_error(Engram::Error, /target_id must be a plain String or Integer/)
+    expect(store.all(scope: "u:1")).to be_empty
+  end
+
   it "rejects target_id subclasses, custom state, and coercible objects without invoking them" do
     calls = 0
     string_subclass = Class.new(String) do
@@ -597,7 +608,7 @@ RSpec.describe Engram::UseCases::Observe do
     expect(store.all(scope: "u:1")).to be_empty
   end
 
-  it "rejects falsey update targets before applying an earlier add" do
+  it "rejects missing or false update targets before applying an earlier add" do
     [nil, false].each do |target_id|
       first = Engram::Record.new(content: "Safe", scope: "u:1", embedding: [0.0])
       second = Engram::Record.new(content: "Correction", scope: "u:1", embedding: [0.0])
@@ -608,13 +619,13 @@ RSpec.describe Engram::UseCases::Observe do
       observe = described_class.new(store: store, extractor: double(extract: [first, second]),
         consolidator: double(reconcile_all: decisions), embedder: embedder)
 
-      expect { observe.call(messages: ["turn"], scope: "u:1") }
-        .to raise_error(Engram::Error, "update decision requires a target_id")
+      message = target_id.nil? ? "update decision requires a target_id" : /target_id must be a plain String or Integer/
+      expect { observe.call(messages: ["turn"], scope: "u:1") }.to raise_error(Engram::Error, message)
       expect(store.all(scope: "u:1")).to be_empty
     end
   end
 
-  it "rejects falsey forget targets before applying an earlier add" do
+  it "rejects missing or false forget targets before applying an earlier add" do
     [nil, false].each do |target_id|
       first = Engram::Record.new(content: "Safe", scope: "u:1", embedding: [0.0])
       second = Engram::Record.new(content: "Correction", scope: "u:1", embedding: [0.0])
@@ -625,8 +636,8 @@ RSpec.describe Engram::UseCases::Observe do
       observe = described_class.new(store: store, extractor: double(extract: [first, second]),
         consolidator: double(reconcile_all: decisions), embedder: embedder)
 
-      expect { observe.call(messages: ["turn"], scope: "u:1") }
-        .to raise_error(Engram::Error, "forget decision requires a target_id")
+      message = target_id.nil? ? "forget decision requires a target_id" : /target_id must be a plain String or Integer/
+      expect { observe.call(messages: ["turn"], scope: "u:1") }.to raise_error(Engram::Error, message)
       expect(store.all(scope: "u:1")).to be_empty
     end
   end

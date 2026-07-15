@@ -155,7 +155,6 @@ module Engram
 
       def canonical_target_id(target_id)
         return if BasicObject.instance_method(:equal?).bind_call(target_id, nil)
-        return false if BasicObject.instance_method(:equal?).bind_call(target_id, false)
 
         target_class = Object.instance_method(:class).bind_call(target_id)
         valid_class = target_class.equal?(Integer) || target_class.equal?(String)
