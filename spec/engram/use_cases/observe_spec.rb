@@ -591,6 +591,22 @@ RSpec.describe Engram::UseCases::Observe do
     expect(store.all(scope: "u:1")).to be_empty
   end
 
+  it "preflights provenance trust laundering before applying an earlier decision" do
+    first = Engram::Record.new(content: "Safe", scope: "u:1", embedding: [0.0])
+    second = Engram::Record.new(content: "Ungrounded later", scope: "u:1", embedding: [0.0],
+      metadata: Engram::Provenance.attach({}, provenance(alignment: :ungrounded)))
+    Engram.config.before_persist = lambda do |candidate|
+      (candidate.content == second.content) ? candidate.with(metadata: {}) : candidate
+    end
+    decisions = [first, second].map { |candidate| Engram::Decision.new(action: :add, candidate: candidate) }
+    observe = described_class.new(store: store, extractor: double(extract: [first, second]),
+      consolidator: double(reconcile_all: decisions), embedder: embedder)
+
+    expect { observe.call(messages: ["turn"], scope: "u:1") }
+      .to raise_error(Engram::Error, /before_persist cannot change provenance trust/)
+    expect(store.all(scope: "u:1")).to be_empty
+  end
+
   it "preflights an update target in another scope before applying an earlier add" do
     victim = store.add(Engram::Record.new(content: "Private", scope: "u:2", embedding: [0.0]))
     first = Engram::Record.new(content: "Safe", scope: "u:1", embedding: [0.0])

@@ -42,10 +42,13 @@ module Engram
     # Applies all write transformations without mutating the store. Input is validated
     # before callbacks can remove or replace provenance, and final output is validated too.
     def prepare(record)
-      validate_provenance!(record)
+      original_provenance = validate_provenance!(record)
       original_content = record.content
       record = @before_persist.call(record) if @before_persist
-      validate_provenance!(record) if record
+      if record
+        transformed_provenance = validate_provenance!(record)
+        validate_provenance_trust!(original_provenance, transformed_provenance) if @before_persist
+      end
       record = @persistence_policy.call(record) if record && @persistence_policy
       validate_provenance!(record) if record
       if record && record.content != original_content
@@ -76,6 +79,13 @@ module Engram
 
     def validate_provenance!(record)
       Engram::Provenance.extract_for_persistence(record.metadata)
+    end
+
+    def validate_provenance_trust!(original, transformed)
+      return unless original
+      return if original.ungrounded? == transformed&.ungrounded?
+
+      raise Engram::Error, "before_persist cannot change provenance trust"
     end
   end
 end

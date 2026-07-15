@@ -19,6 +19,16 @@ RSpec.describe Engram::Persistence do
     {"_engram" => {"provenance" => {"version" => 99}}}
   end
 
+  def provenance(alignment: :exact)
+    Engram::Provenance.new(
+      sources: [Engram::Provenance::Source.new(
+        source_id: "message:1", source_type: "message", message_index: 0, role: "user",
+        spans: [Engram::Provenance::Span.new(start_offset: 0, end_offset: 4)], alignment: alignment
+      )],
+      extractor: Engram::Provenance::Extractor.new(name: "host", model: "model-1"), confidence: 0.9
+    )
+  end
+
   describe "#add" do
     context "without a persistence policy" do
       let(:policy) { nil }
@@ -90,6 +100,41 @@ RSpec.describe Engram::Persistence do
         .to raise_error(Engram::Error, /unsupported provenance version 99/)
       expect(store.all(scope: record.scope)).to be_empty
     end
+
+    it "rejects before_persist laundering ungrounded provenance as legacy metadata" do
+      candidate = record.with(metadata: Engram::Provenance.attach({}, provenance(alignment: :ungrounded)))
+      hook = ->(transformed) { transformed.with(metadata: {}) }
+      persistence = described_class.new(store: store, embedder: Engram::Adapters::NullEmbedder.new,
+        before_persist: hook, persistence_policy: Engram::PersistencePolicy.new)
+
+      expect { persistence.add(candidate) }
+        .to raise_error(Engram::Error, /before_persist cannot change provenance trust/)
+      expect(store.all(scope: record.scope)).to be_empty
+    end
+
+    it "rejects before_persist downgrading grounded provenance to ungrounded" do
+      grounded = record.with(metadata: Engram::Provenance.attach({}, provenance))
+      ungrounded_metadata = Engram::Provenance.attach({}, provenance(alignment: :ungrounded))
+      hook = ->(transformed) { transformed.with(metadata: ungrounded_metadata) }
+      persistence = described_class.new(store: store, embedder: Engram::Adapters::NullEmbedder.new,
+        before_persist: hook, persistence_policy: Engram::PersistencePolicy.new(allow_ungrounded: true))
+
+      expect { persistence.add(grounded) }
+        .to raise_error(Engram::Error, /before_persist cannot change provenance trust/)
+      expect(store.all(scope: record.scope)).to be_empty
+    end
+
+    it "allows before_persist content redaction while preserving provenance" do
+      grounded = record.with(metadata: Engram::Provenance.attach({}, provenance))
+      hook = ->(transformed) { transformed.with(content: "User likes [REDACTED]") }
+      persistence = described_class.new(store: store, embedder: Engram::Adapters::NullEmbedder.new,
+        before_persist: hook, persistence_policy: Engram::PersistencePolicy.new)
+
+      persisted = persistence.add(grounded)
+
+      expect(persisted.content).to eq("User likes [REDACTED]")
+      expect(Engram::Provenance.extract(persisted.metadata)).to eq(provenance)
+    end
   end
 
   describe "#update" do
@@ -114,6 +159,22 @@ RSpec.describe Engram::Persistence do
         expect {
           persistence.update(scope: candidate.scope, id: stored_record.id, record: candidate)
         }.to raise_error(Engram::Error, /unsupported provenance version 99/)
+        expect(store.all(scope: stored_record.scope).map(&:to_h)).to eq([original])
+      end
+
+      it "rejects before_persist removing grounded provenance without mutating the stored record" do
+        original = stored_record.to_h
+        candidate = stored_record.with(
+          content: "User likes coffee",
+          metadata: Engram::Provenance.attach({}, provenance)
+        )
+        hook = ->(transformed) { transformed.with(metadata: {}) }
+        persistence = described_class.new(store: store, embedder: Engram::Adapters::NullEmbedder.new,
+          before_persist: hook, persistence_policy: Engram::PersistencePolicy.new)
+
+        expect {
+          persistence.update(scope: candidate.scope, id: stored_record.id, record: candidate)
+        }.to raise_error(Engram::Error, /before_persist cannot change provenance trust/)
         expect(store.all(scope: stored_record.scope).map(&:to_h)).to eq([original])
       end
     end
