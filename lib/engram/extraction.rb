@@ -7,8 +7,11 @@ module Engram
     attr_reader :record, :provenance
 
     def initialize(record:, provenance:)
-      raise ArgumentError, "record must be an Engram::Record" unless record.is_a?(Engram::Record)
-      raise ArgumentError, "provenance must be an Engram::Provenance" unless provenance.is_a?(Engram::Provenance)
+      is_record = Object.instance_method(:is_a?).bind_call(record, Engram::Record)
+      raise ArgumentError, "record must be an Engram::Record" unless is_record
+
+      is_provenance = Object.instance_method(:is_a?).bind_call(provenance, Engram::Provenance)
+      raise ArgumentError, "provenance must be an Engram::Provenance" unless is_provenance
 
       @record = record
       @provenance = provenance
@@ -16,7 +19,14 @@ module Engram
     end
 
     def to_record
-      record.with(metadata: Engram::Provenance.attach(record.metadata, provenance))
+      exact_record = Object.instance_method(:instance_of?).bind_call(record, Engram::Record)
+      detached = Engram::Internal::CandidateIntegrity.new.detach(record)
+      source = exact_record ? record : detached
+      attributes = Engram::Record::STATE_READERS.to_h do |attribute|
+        [attribute, Engram::Record.instance_method(attribute).bind_call(source)]
+      end
+      attributes[:metadata] = Engram::Provenance.attach(attributes.fetch(:metadata), provenance)
+      Engram::Record.new(**attributes)
     end
   end
 end

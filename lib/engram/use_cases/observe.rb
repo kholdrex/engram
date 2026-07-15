@@ -93,8 +93,8 @@ module Engram
 
         results.map do |result|
           candidate = case result
-          when Engram::Record then result
-          when Engram::Extraction then result.to_record
+          when Engram::Record then normalize_record(result)
+          when Engram::Extraction then normalize_record(result.to_record)
           else
             raise Engram::Error, "extractor must return an Array containing only Engram::Record or Engram::Extraction values"
           end
@@ -103,6 +103,17 @@ module Engram
 
           candidate
         end
+      end
+
+      def normalize_record(record)
+        if Object.instance_method(:instance_of?).bind_call(record, Engram::Record)
+          candidate_integrity.validate!(record)
+          return record
+        end
+
+        candidate_integrity.detach(record)
+      rescue Engram::Internal::CandidateIntegrity::Error => error
+        raise Engram::Error, error.message
       end
 
       def consolidate(candidates:, scope:)

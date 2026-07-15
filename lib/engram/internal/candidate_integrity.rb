@@ -1,5 +1,8 @@
 # frozen_string_literal: true
 
+require "bigdecimal"
+require "date"
+
 module Engram
   module Internal
     # Captures reconciliation candidates and verifies that an untrusted custom
@@ -58,10 +61,16 @@ module Engram
         raise MutationError, CANDIDATE_MUTATION_MESSAGE, error.backtrace
       end
 
+      # Validates a candidate without dispatching through any of its readers.
+      def validate!(candidate)
+        snapshot_record(candidate)
+        nil
+      end
+
       # Returns a deep, behavior-free copy whose nested state shares no mutable
       # references with the candidate supplied to an untrusted consolidator.
       def detach(candidate)
-        snapshot_record(candidate)
+        validate_detachable_record!(candidate)
         attributes = RECORD_STATE_READERS.to_h do |attribute, reader|
           [attribute, duplicate_value(reader.bind_call(candidate))]
         end
@@ -76,7 +85,7 @@ module Engram
           raise InvalidStateError, "unsupported candidate value"
         end
 
-        if value_class.equal?(String) || value_class.equal?(Time)
+        if value_class.equal?(String) || value_class.equal?(Time) || value_class.equal?(Date)
           Object.instance_method(:dup).bind_call(value)
         elsif value_class.equal?(Array)
           with_acyclic_value(value, active) do
@@ -190,6 +199,10 @@ module Engram
           [:integer, value.to_s]
         elsif value_class.equal?(Float)
           [:float, [value].pack("G")]
+        elsif value_class.equal?(BigDecimal)
+          canonical_big_decimal(value)
+        elsif value_class.equal?(Date)
+          canonical_date(value)
         elsif value_class.equal?(Time)
           canonical_time(value)
         elsif value_class.equal?(Array)
@@ -206,6 +219,22 @@ module Engram
           !custom_behavior?(candidate, Engram::Record)
       rescue TypeError
         false
+      end
+
+      def validate_detachable_record!(candidate)
+        is_record = Object.instance_method(:is_a?).bind_call(candidate, Engram::Record)
+        raise InvalidStateError, "candidate must be an Engram::Record" unless is_record
+
+        instance_variables = Object.instance_method(:instance_variables).bind_call(candidate)
+        unless instance_variables.sort == RECORD_INSTANCE_VARIABLES.sort
+          raise InvalidStateError, "candidate Record must have exactly the expected instance variables"
+        end
+
+        if Object.instance_method(:instance_of?).bind_call(candidate, Engram::Record) && !plain_record?(candidate)
+          raise InvalidStateError, "candidate must be a plain Engram::Record"
+        end
+      rescue TypeError
+        raise InvalidStateError, "candidate must be an Engram::Record"
       end
 
       def plain_class(value)
@@ -240,6 +269,25 @@ module Engram
           singleton_methods.length != class_methods.length ||
             singleton_methods.any? { |method_name| !class_methods.include?(method_name) }
         end
+      end
+
+      def canonical_date(value)
+        start = Date.instance_method(:start).bind_call(value)
+        [:date, identity(value), frozen?(value),
+          Date.instance_method(:jd).bind_call(value), canonical_date_start(start)]
+      end
+
+      def canonical_date_start(value)
+        value_class = Object.instance_method(:class).bind_call(value)
+        return [:float, [value].pack("G")] if value_class.equal?(Float)
+        return [:integer, value.to_s] if value_class.equal?(Integer)
+
+        raise InvalidStateError, "unsupported Date start #{value_class}"
+      end
+
+      def canonical_big_decimal(value)
+        sign, digits, base, exponent = BigDecimal.instance_method(:split).bind_call(value)
+        [:big_decimal, sign, String.instance_method(:b).bind_call(digits), base, exponent]
       end
 
       def canonical_time(value)

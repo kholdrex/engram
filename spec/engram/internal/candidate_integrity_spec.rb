@@ -1,5 +1,8 @@
 # frozen_string_literal: true
 
+require "bigdecimal"
+require "date"
+
 RSpec.describe Engram::Internal::CandidateIntegrity do
   subject(:integrity) { described_class.new }
 
@@ -45,6 +48,28 @@ RSpec.describe Engram::Internal::CandidateIntegrity do
     snapshot = integrity.snapshot(candidates)
 
     expect(integrity.verify!(candidates, snapshot)).to be_nil
+  end
+
+  it "accepts and detaches Date and BigDecimal metadata values" do
+    metadata = {
+      "date" => Date.new(2026, 7, 15),
+      "decimal" => BigDecimal("123.450"),
+      "special_decimals" => [BigDecimal("-0"), BigDecimal("Infinity"), BigDecimal("NaN")]
+    }
+    candidate = record(metadata: metadata)
+    candidates = [candidate]
+    snapshot = integrity.snapshot(candidates)
+
+    detached = integrity.detach(candidate)
+
+    expect(integrity.verify!(candidates, snapshot)).to be_nil
+    expect(detached.metadata).to eq(metadata)
+    expect(detached.metadata).not_to equal(metadata)
+    expect(detached.metadata.fetch("date")).not_to equal(metadata.fetch("date"))
+
+    metadata.fetch("date").freeze
+    expect { integrity.verify!(candidates, snapshot) }
+      .to raise_error(described_class::MutationError, described_class::CANDIDATE_MUTATION_MESSAGE)
   end
 
   it "rejects unsupported custom and unmarshalable values when taking the snapshot" do

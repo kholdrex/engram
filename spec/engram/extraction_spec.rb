@@ -36,6 +36,47 @@ RSpec.describe Engram::Extraction do
     expect(record.metadata).to eq(metadata)
   end
 
+  it "converts Record subclasses without invoking overridden type checks or readers" do
+    record_class = Class.new(Engram::Record) do
+      def is_a?(_class)
+        raise "subclass type check must not be invoked"
+      end
+
+      def metadata
+        raise "subclass reader must not be invoked"
+      end
+    end
+    metadata = {"host" => true}
+    record = record_class.new(content: "Tea", scope: "user:1", metadata: metadata)
+
+    converted = described_class.new(record: record, provenance: provenance).to_record
+
+    expect(converted).to be_instance_of(Engram::Record)
+    expect(converted.content).to eq("Tea")
+    expect(converted.metadata).to include("host" => true)
+    expect(Engram::Provenance.extract(converted.metadata)).to eq(provenance)
+    expect(metadata).to eq("host" => true)
+  end
+
+  it "rejects singleton Record behavior before invoking metadata or with" do
+    invoked = []
+
+    %i[metadata with].each do |method_name|
+      record = Engram::Record.new(content: "Tea", scope: "user:1")
+      record.define_singleton_method(method_name) do |**|
+        invoked << method_name
+        raise "singleton #{method_name} must not be invoked"
+      end
+
+      extraction = described_class.new(record: record, provenance: provenance)
+
+      expect { extraction.to_record }
+        .to raise_error(Engram::Internal::CandidateIntegrity::InvalidStateError, /plain Engram::Record/)
+    end
+
+    expect(invoked).to be_empty
+  end
+
   it "requires Record and Provenance values" do
     expect { described_class.new(record: Object.new, provenance: provenance) }
       .to raise_error(ArgumentError, /record/)

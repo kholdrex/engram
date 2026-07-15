@@ -42,6 +42,74 @@ RSpec.describe Engram::UseCases::Observe do
       .call(messages: ["turn"], scope: "u:1")
   end
 
+  it "normalizes Record subclasses to plain records before candidate integrity checks" do
+    record_class = Class.new(Engram::Record) do
+      def id
+        raise "subclass reader must not be invoked"
+      end
+    end
+    extracted = record_class.new(content: "Subclass candidate", scope: "u:1", embedding: [0.0])
+    consolidator = double
+    expect(consolidator).to receive(:reconcile_all) do |candidates:, scope:|
+      expect(candidates.first).to be_instance_of(Engram::Record)
+      [Engram::Decision.new(action: :add, candidate: candidates.first)]
+    end
+
+    applied = described_class.new(store: store, extractor: double(extract: [extracted]),
+      consolidator: consolidator, embedder: embedder)
+      .call(messages: ["turn"], scope: "u:1")
+
+    expect(applied.map(&:action)).to eq([:add])
+    expect(store.all(scope: "u:1").map(&:content)).to eq(["Subclass candidate"])
+  end
+
+  it "rejects singleton Record behavior without invoking an overridden id reader" do
+    extracted = Engram::Record.new(content: "Singleton candidate", scope: "u:1", embedding: [0.0])
+    id_calls = 0
+    extracted.define_singleton_method(:id) do
+      id_calls += 1
+      raise "singleton reader must not be invoked"
+    end
+    consolidator = double
+    expect(consolidator).not_to receive(:reconcile_all)
+
+    expect do
+      described_class.new(store: store, extractor: double(extract: [extracted]),
+        consolidator: consolidator, embedder: embedder)
+        .call(messages: ["turn"], scope: "u:1")
+    end.to raise_error(Engram::Error, /plain Engram::Record/)
+
+    expect(id_calls).to eq(0)
+    expect(store.all(scope: "u:1")).to be_empty
+  end
+
+  it "validates an Extraction subclass result before invoking a Record reader" do
+    behavior_bearing = Engram::Record.new(content: "Behavior-bearing candidate", scope: "u:1", embedding: [0.0])
+    id_calls = 0
+    behavior_bearing.define_singleton_method(:id) do
+      id_calls += 1
+      raise "singleton reader must not be invoked"
+    end
+    extraction_class = Class.new(Engram::Extraction) do
+      define_method(:to_record) { behavior_bearing }
+    end
+    extracted = extraction_class.new(
+      record: Engram::Record.new(content: "Original", scope: "u:1", embedding: [0.0]),
+      provenance: provenance
+    )
+    consolidator = double
+    expect(consolidator).not_to receive(:reconcile_all)
+
+    expect do
+      described_class.new(store: store, extractor: double(extract: [extracted]),
+        consolidator: consolidator, embedder: embedder)
+        .call(messages: ["turn"], scope: "u:1")
+    end.to raise_error(Engram::Error, /plain Engram::Record/)
+
+    expect(id_calls).to eq(0)
+    expect(store.all(scope: "u:1")).to be_empty
+  end
+
   it "rejects invalid extractor containers and members before consolidation or store mutation" do
     valid = Engram::Record.new(content: "Candidate", scope: "u:1", embedding: [0.0])
     invalid_outputs = [nil, valid, [valid].each, [Object.new], [valid, nil]]
