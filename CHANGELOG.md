@@ -28,8 +28,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Extractors must return an `Array`; each result may be a plain `Engram::Record` or an
   `Engram::Extraction` carrying provenance.
 - Custom consolidator decisions must reference the actual same-scope `Engram::Record` instance
-  supplied for reconciliation and must not mutate candidate state, including nested metadata or
-  embeddings; substituted, modified, missing, malformed, or cross-scope candidates fail closed.
+  supplied for reconciliation and must treat both the candidates array and records as read-only.
+  Engram now fails closed on collection replacement/reordering/iteration overrides and on nested
+  value, identity/alias/topology, frozen-state, custom-behavior, hidden-state, or exact `Time`
+  changes before destructive authorization. Candidate values are restricted to behavior-free
+  nil/booleans, strings, symbols, integers, floats, times, and acyclic plain arrays/hashes;
+  custom, cyclic, default-proc hash, and unsupported values are rejected before reconciliation.
+  Substituted, modified, missing, malformed, or cross-scope candidates fail closed.
   `Observe` preflights the complete decision batch, including persistence policy and hook
   transformations, before beginning store mutations.
 - `MemoryStore` mutations now require an explicit `scope:` and enforce the `(scope, id)` boundary

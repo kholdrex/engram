@@ -1,6 +1,15 @@
 # frozen_string_literal: true
 
 RSpec.describe Engram::Record do
+  it "uses its canonical state readers for hash serialization" do
+    record = described_class.new(content: "User likes tea", scope: "user:1")
+
+    expect(record.to_h.keys).to eq(described_class::STATE_READERS)
+    expect(record.to_h).to eq(described_class::STATE_READERS.to_h do |reader|
+      [reader, record.public_send(reader)]
+    end)
+  end
+
   it "uses fact as the default durable memory kind" do
     record = described_class.new(content: "User likes tea", scope: "user:1")
 

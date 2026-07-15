@@ -291,6 +291,24 @@ memory.observe([
 # extracts "User is on the Pro plan", and if a "Free plan" memory exists, updates it
 ```
 
+### Custom consolidator candidate contract
+
+`reconcile_all(candidates:, scope:)` receives a read-only, plain `Array` of read-only,
+plain `Engram::Record` instances. A custom consolidator may inspect candidates and return
+decisions that reference those exact instances, but it must not replace, append, remove, or
+reorder collection entries; override collection iteration; add collection or record state or
+behavior; or mutate, replace, freeze, or otherwise change any candidate value. Engram verifies
+this contract before it authorizes any add, update, or deletion and fails closed on a violation.
+
+The supported candidate value domain is exact `nil`, `true`/`false`, `String`, `Symbol`,
+`Integer`, `Float`, `Time`, and recursively nested plain `Array` and plain `Hash` values.
+Containers must be acyclic; hashes cannot have default procs. Object identity, aliases and
+topology, hash defaults/mode/order, string encoding and bytes, frozen state, and full `Time`
+value/mode (including subnanosecond precision) are integrity-protected. Subclasses, singleton
+or extended methods (including private methods), extra instance variables, cycles, procs, IO,
+and other custom or unsupported values are rejected before reconciliation. Custom extractors
+should construct plain records from this domain rather than attaching application objects.
+
 ## Memory kinds and persistence policy
 
 Every memory has a normalized `kind`:

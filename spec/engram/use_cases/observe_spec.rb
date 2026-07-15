@@ -230,6 +230,36 @@ RSpec.describe Engram::UseCases::Observe do
     expect(store.all(scope: "u:1")).to eq([target])
   end
 
+  it "rejects candidates collection mutation before authorizing deletion" do
+    mutations = [
+      ->(candidates) { candidates << candidates.first },
+      ->(candidates) { candidates.reverse! },
+      ->(candidates) { candidates.define_singleton_method(:each) { |_block| [] } }
+    ]
+
+    mutations.each do |mutation|
+      target = store.add(Engram::Record.new(content: "Old", scope: "u:1", embedding: [0.0]))
+      candidates = [
+        Engram::Record.new(content: "First", scope: "u:1", embedding: [0.0]),
+        Engram::Record.new(content: "Second", scope: "u:1", embedding: [0.0])
+      ]
+      consolidator = Object.new
+      consolidator.define_singleton_method(:reconcile_all) do |candidates:, scope:|
+        decision_candidate = candidates.first
+        mutation.call(candidates)
+        [Engram::Decision.new(action: :forget, candidate: decision_candidate, target_id: target.id)]
+      end
+
+      expect do
+        described_class.new(store: store, extractor: double(extract: candidates),
+          consolidator: consolidator, embedder: embedder)
+          .call(messages: ["turn"], scope: "u:1")
+      end.to raise_error(Engram::Error, /must not mutate the candidates collection/)
+      expect(store.all(scope: "u:1")).to eq([target])
+      store.clear
+    end
+  end
+
   it "rejects nested provenance mutation by a custom consolidator" do
     target = store.add(Engram::Record.new(content: "Old", scope: "u:1", embedding: [0.0]))
     candidate = Engram::Record.new(content: "Ungrounded correction", scope: "u:1", embedding: [0.0],

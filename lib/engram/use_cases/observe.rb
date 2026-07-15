@@ -9,10 +9,6 @@ module Engram
     # When a ProcessedTurns store and an idempotency_key are provided, a turn that was
     # already processed is skipped (no extraction, no duplicate memories).
     class Observe
-      CANDIDATE_STATE_ATTRIBUTES = %i[
-        id content scope embedding kind importance metadata created_at last_accessed_at
-      ].freeze
-
       def initialize(store:, extractor:, consolidator:, processed_turns: nil, embedder: Engram.config.embedder)
         @store = store
         @extractor = extractor
@@ -108,15 +104,31 @@ module Engram
       def consolidate(candidates:, scope:)
         payload = Engram::Instrumentation.payload(scope: scope, store: @store, candidate_count: candidates.size)
         Engram::Instrumentation.instrument("consolidate", payload) do
-          candidate_snapshots = candidates.map { |candidate| [candidate, snapshot_candidate(candidate)] }
+          candidate_snapshot = snapshot_candidates(candidates)
           raw_decisions = @consolidator.reconcile_all(candidates: candidates, scope: scope)
           decisions = canonicalize_decisions(raw_decisions)
-          verify_candidates_unchanged!(candidate_snapshots)
+          verify_candidates!(candidates, candidate_snapshot)
 
           payload[:decision_count] = decisions.size
           payload[:decision_actions] = decisions.map { |decision| decision.action.to_s }
           decisions
         end
+      end
+
+      def snapshot_candidates(candidates)
+        candidate_integrity.snapshot(candidates)
+      rescue Engram::Internal::CandidateIntegrity::Error => error
+        raise Engram::Error, error.message
+      end
+
+      def verify_candidates!(candidates, snapshot)
+        candidate_integrity.verify!(candidates, snapshot)
+      rescue Engram::Internal::CandidateIntegrity::Error => error
+        raise Engram::Error, error.message
+      end
+
+      def candidate_integrity
+        @candidate_integrity ||= Engram::Internal::CandidateIntegrity.new
       end
 
       def canonicalize_decisions(raw_decisions)
@@ -141,39 +153,9 @@ module Engram
         end
       end
 
-      def snapshot_candidate(candidate)
-        CANDIDATE_STATE_ATTRIBUTES.to_h do |attribute|
-          [attribute, deep_copy_candidate_value(candidate.public_send(attribute))]
-        end
-      end
-
-      def deep_copy_candidate_value(value)
-        case value
-        when Hash
-          value.each_with_object({}) do |(key, nested_value), copy|
-            copy[deep_copy_candidate_value(key)] = deep_copy_candidate_value(nested_value)
-          end
-        when Array
-          value.map { |element| deep_copy_candidate_value(element) }
-        when String
-          value.dup
-        else
-          value
-        end
-      end
-
-      def verify_candidates_unchanged!(candidate_snapshots)
-        changed = candidate_snapshots.any? do |candidate, snapshot|
-          CANDIDATE_STATE_ATTRIBUTES.any? do |attribute|
-            candidate.public_send(attribute) != snapshot.fetch(attribute)
-          end
-        end
-        raise Engram::Error, "consolidators must not mutate candidates" if changed
-      end
-
       def preflight(decisions, candidates, scope)
         candidate_budget = Hash.new(0).compare_by_identity
-        candidates.each { |candidate| candidate_budget[candidate] += 1 }
+        Array.instance_method(:each).bind_call(candidates) { |candidate| candidate_budget[candidate] += 1 }
         decision_counts = Hash.new(0).compare_by_identity
 
         decisions.each do |decision|
