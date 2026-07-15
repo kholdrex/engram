@@ -69,6 +69,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   set `dimensions:` to that model's actual output size.
 
 ### Fixed
+- Observation rejects extractor candidates with caller-supplied IDs, and `InMemoryStore#add`
+  always allocates a fresh ID like the pgvector adapter, preventing same- or cross-scope record
+  replacement through add semantics.
+- `forget` now separates destructive provenance authorization from write-content filtering and
+  redaction, so secret or transient memories can be deleted. Custom policies may implement
+  `allow_destructive?` with a strict boolean return; write-only policies no longer authorize
+  deletion through their `call` result.
 - `Observe` now raises `Engram::ObservationInProgressError` when a turn is claimed but not
   completed, rather than reporting a successful no-op. `ObserveJob` retries this error with
   backoff that outlasts the default claim lease; direct callers should handle it as retryable.

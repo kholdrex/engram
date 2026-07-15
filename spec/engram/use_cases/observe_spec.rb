@@ -59,6 +59,28 @@ RSpec.describe Engram::UseCases::Observe do
     end
   end
 
+  it "rejects extracted add candidates with supplied IDs before they can overwrite scoped records" do
+    victims = [
+      store.add(Engram::Record.new(content: "Same scope", scope: "u:1", embedding: [0.0])),
+      store.add(Engram::Record.new(content: "Other scope", scope: "u:2", embedding: [0.0]))
+    ]
+
+    victims.each do |victim|
+      candidate = Engram::Record.new(id: victim.id, content: "Overwrite", scope: "u:1", embedding: [0.0])
+      extractor = double(extract: [candidate])
+      consolidator = double
+      expect(consolidator).not_to receive(:reconcile_all)
+
+      expect do
+        described_class.new(store: store, extractor: extractor, consolidator: consolidator, embedder: embedder)
+          .call(messages: ["turn"], scope: "u:1")
+      end.to raise_error(Engram::Error, "observation candidates must not have an id")
+    end
+
+    expect(store.all(scope: "u:1").map(&:content)).to eq(["Same scope"])
+    expect(store.all(scope: "u:2").map(&:content)).to eq(["Other scope"])
+  end
+
   it "releases its claim when extractor output validation fails" do
     outputs = [nil, []]
     extractor = Object.new
@@ -127,6 +149,44 @@ RSpec.describe Engram::UseCases::Observe do
 
     expect(applied).to be_empty
     expect(store.all(scope: "u:1")).to eq([target])
+  end
+
+  it "authorizes forget independently of write-content filtering and redaction" do
+    candidate_contents = [
+      "API key is abcdefgh_123",
+      "The migration was completed today",
+      "Remove internal-ticket-123"
+    ]
+    Engram.config.persistence_policy = Engram::PersistencePolicy.new(
+      denylist_patterns: [/internal-ticket-\d+/i]
+    )
+
+    candidate_contents.each do |content|
+      target = store.add(Engram::Record.new(content: content, scope: "u:1", embedding: [0.0]))
+      candidate = Engram::Record.new(content: content, scope: "u:1", embedding: [0.0])
+      decision = Engram::Decision.new(action: :forget, candidate: candidate, target_id: target.id)
+
+      applied = described_class.new(store: store, extractor: double(extract: [candidate]),
+        consolidator: double(reconcile_all: [decision]), embedder: embedder)
+        .call(messages: ["turn"], scope: "u:1")
+
+      expect(applied.map(&:action)).to eq([:forget])
+      expect(store.all(scope: "u:1")).to be_empty
+    end
+  end
+
+  it "does not use a custom write-only policy to authorize forget" do
+    Engram.config.persistence_policy = ->(_) {}
+    target = store.add(Engram::Record.new(content: "Old", scope: "u:1", embedding: [0.0]))
+    candidate = Engram::Record.new(content: "Correction", scope: "u:1", embedding: [0.0])
+    decision = Engram::Decision.new(action: :forget, candidate: candidate, target_id: target.id)
+
+    applied = described_class.new(store: store, extractor: double(extract: [candidate]),
+      consolidator: double(reconcile_all: [decision]), embedder: embedder)
+      .call(messages: ["turn"], scope: "u:1")
+
+    expect(applied.map(&:action)).to eq([:forget])
+    expect(store.all(scope: "u:1")).to be_empty
   end
 
   it "rejects a forget decision without a Record candidate before deleting" do
@@ -360,7 +420,8 @@ RSpec.describe Engram::UseCases::Observe do
   end
 
   it "preserves plain String target IDs" do
-    store.add(Engram::Record.new(content: "Old", scope: "u:1", id: "victim", embedding: [0.0]))
+    allow(store).to receive(:existing_ids).with(scope: "u:1", ids: ["victim"]).and_return(["victim"])
+    expect(store).to receive(:delete).with(scope: "u:1", id: "victim").and_return(1)
     candidate = Engram::Record.new(content: "Correction", scope: "u:1", embedding: [0.0],
       metadata: Engram::Provenance.attach({}, provenance))
     decision = Engram::Decision.new(action: :forget, candidate: candidate, target_id: +"victim")
@@ -372,7 +433,6 @@ RSpec.describe Engram::UseCases::Observe do
     expect(applied.map(&:action)).to eq([:forget])
     expect(applied.first.target_id).to eq("victim")
     expect(applied.first.target_id).not_to equal(decision.target_id)
-    expect(store.all(scope: "u:1")).to be_empty
   end
 
   it "reads each untrusted decision accessor once and uses only canonical values afterward" do

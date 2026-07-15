@@ -29,6 +29,13 @@ module Engram
       redact(record)
     end
 
+    # Destructive authorization is deliberately independent from write-content filtering and
+    # redaction. Provenance trust still applies, but secret/transient content can always be removed.
+    def allow_destructive?(record)
+      provenance = Engram::Provenance.extract_for_persistence(record.metadata)
+      !provenance&.ungrounded? || @allow_ungrounded
+    end
+
     private
 
     def reject?(content)

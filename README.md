@@ -308,6 +308,8 @@ value/mode (including subnanosecond precision) are integrity-protected. Subclass
 or extended methods (including private methods), extra instance variables, cycles, procs, IO,
 and other custom or unsupported values are rejected before reconciliation. Custom extractors
 should construct plain records from this domain rather than attaching application objects.
+Extracted candidates must also have a nil `id`: IDs are store-owned and are allocated only
+when an add is persisted.
 
 ## Memory kinds and persistence policy
 
@@ -346,6 +348,14 @@ Engram.configure do |config|
   )
 end
 ```
+
+Write-content filtering and transformation are not deletion authorization. `forget` still
+validates scope, target existence, candidate integrity, and provenance, but it does not run
+`before_persist` or the policy's `call` method; this allows secret, transient, and redacted
+memories to be removed. A custom policy can additionally control destructive decisions by
+implementing `allow_destructive?(record)` and returning exactly `true` or `false`. Policies
+that only implement `call` affect writes but do not prevent deletion. The built-in policy uses
+this separate hook to retain its ungrounded-provenance protection.
 
 ### Extraction provenance
 

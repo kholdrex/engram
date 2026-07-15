@@ -15,7 +15,7 @@ module Engram
       def add(record)
         validate_scope!(record.scope)
 
-        record.id ||= (@sequence += 1)
+        record.id = (@sequence += 1)
         @records[record.id] = record
         record
       end

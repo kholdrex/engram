@@ -136,24 +136,34 @@ RSpec.describe Engram::Persistence do
       end
     end
 
-    context "when the persistence policy returns false" do
-      let(:policy) { ->(_) { false } }
+    context "when a policy explicitly denies destructive authorization" do
+      let(:policy) do
+        Class.new do
+          def call(record) = record
+          def allow_destructive?(_) = false
+        end.new
+      end
 
       it "rejects authorization" do
         expect(persistence.allowed?(record)).to be(false)
       end
     end
 
-    context "when the persistence policy returns nil" do
+    context "when a custom write policy has no destructive authorization contract" do
       let(:policy) { ->(_) {} }
 
-      it "rejects authorization" do
-        expect(persistence.allowed?(record)).to be(false)
+      it "does not conflate write rejection with destructive authorization" do
+        expect(persistence.allowed?(record)).to be(true)
       end
     end
 
-    context "when the persistence policy returns a record" do
-      let(:policy) { ->(candidate) { candidate } }
+    context "when a policy explicitly allows destructive authorization" do
+      let(:policy) do
+        Class.new do
+          def call(record) = record
+          def allow_destructive?(_) = true
+        end.new
+      end
 
       it "allows authorization" do
         expect(persistence.allowed?(record)).to be(true)
@@ -180,6 +190,18 @@ RSpec.describe Engram::Persistence do
         expect { persistence.allowed?(record.with(metadata: malformed_provenance)) }
           .to raise_error(Engram::Error, /malformed provenance/)
       end
+    end
+
+    it "rejects malformed destructive policy returns with a stable Engram error" do
+      policy = Class.new do
+        def call(record) = record
+        def allow_destructive?(_) = {allowed: true}
+      end.new
+      persistence = described_class.new(store: store, embedder: Engram::Adapters::NullEmbedder.new,
+        persistence_policy: policy)
+
+      expect { persistence.allowed?(record) }
+        .to raise_error(Engram::Error, "persistence policy allow_destructive? must return true or false")
     end
   end
 end

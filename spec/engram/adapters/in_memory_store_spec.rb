@@ -139,6 +139,22 @@ RSpec.describe Engram::Adapters::InMemoryStore do
     expect(r.id).not_to be_nil
   end
 
+  it "allocates IDs on add instead of overwriting records with caller-supplied IDs" do
+    same_scope = store.add(rec("same scope", scope: "u:1", embedding: [1.0, 0.0]))
+    other_scope = store.add(rec("other scope", scope: "u:2", embedding: [1.0, 0.0]))
+
+    supplied_same = rec("new same", scope: "u:1", embedding: [1.0, 0.0])
+    supplied_same.id = same_scope.id
+    supplied_other = rec("new other", scope: "u:1", embedding: [1.0, 0.0])
+    supplied_other.id = other_scope.id
+
+    added = [store.add(supplied_same), store.add(supplied_other)]
+
+    expect(added.map(&:id)).not_to include(same_scope.id, other_scope.id)
+    expect(store.all(scope: "u:1").map(&:content)).to eq(["same scope", "new same", "new other"])
+    expect(store.all(scope: "u:2").map(&:content)).to eq(["other scope"])
+  end
+
   it "updates an existing record by id" do
     r = store.add(rec("old", scope: "u:1", embedding: [1.0, 0.0]))
     updated = store.update(scope: "u:1", id: r.id, record: rec("new", scope: "u:1", embedding: [0.0, 1.0]))

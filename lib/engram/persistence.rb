@@ -56,14 +56,20 @@ module Engram
       record
     end
 
-    # Applies policy to a candidate that authorizes a destructive decision. Malformed
-    # provenance raises Engram::Error rather than authorizing the decision. Hooks and embedding
-    # preparation are intentionally reserved for records that will be written.
+    # Authorizes a destructive decision without applying write transformations or content
+    # filtering. Policies may opt into this separate contract with #allow_destructive?.
+    # Malformed provenance always fails closed.
     def allowed?(record)
       validate_provenance!(record)
-      record = @persistence_policy.call(record) if @persistence_policy
-      validate_provenance!(record) if record
-      !!record
+      return true unless @persistence_policy&.respond_to?(:allow_destructive?)
+
+      authorization = @persistence_policy.allow_destructive?(record)
+      unless authorization.equal?(true) || authorization.equal?(false)
+        raise Engram::Error, "persistence policy allow_destructive? must return true or false"
+      end
+      validate_provenance!(record)
+
+      authorization
     end
 
     private

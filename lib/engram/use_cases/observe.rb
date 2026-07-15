@@ -92,12 +92,16 @@ module Engram
         end
 
         results.map do |result|
-          case result
+          candidate = case result
           when Engram::Record then result
           when Engram::Extraction then result.to_record
           else
             raise Engram::Error, "extractor must return an Array containing only Engram::Record or Engram::Extraction values"
           end
+
+          raise Engram::Error, "observation candidates must not have an id" unless candidate.id.nil?
+
+          candidate
         end
       end
 
