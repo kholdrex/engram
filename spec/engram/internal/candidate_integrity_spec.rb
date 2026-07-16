@@ -1,8 +1,5 @@
 # frozen_string_literal: true
 
-require "bigdecimal"
-require "date"
-
 RSpec.describe Engram::Internal::CandidateIntegrity do
   subject(:integrity) { described_class.new }
 
@@ -50,12 +47,15 @@ RSpec.describe Engram::Internal::CandidateIntegrity do
     expect(integrity.verify!(candidates, snapshot)).to be_nil
   end
 
-  it "accepts and detaches Date and BigDecimal metadata values" do
-    metadata = {
-      "date" => Date.new(2026, 7, 15),
-      "decimal" => BigDecimal("123.450"),
-      "special_decimals" => [BigDecimal("-0"), BigDecimal("Infinity"), BigDecimal("NaN")]
-    }
+  it "accepts and detaches opaque application metadata values" do
+    value_class = Class.new do
+      def initialize(payload)
+        @payload = payload
+      end
+    end
+    value_object = value_class.new({"amount" => "123.450"})
+    application_object = Object.new
+    metadata = {"value_object" => value_object, "nested" => [application_object]}
     candidate = record(metadata: metadata)
     candidates = [candidate]
     snapshot = integrity.snapshot(candidates)
@@ -63,11 +63,10 @@ RSpec.describe Engram::Internal::CandidateIntegrity do
     detached = integrity.detach(candidate)
 
     expect(integrity.verify!(candidates, snapshot)).to be_nil
-    expect(detached.metadata).to eq(metadata)
     expect(detached.metadata).not_to equal(metadata)
-    expect(detached.metadata.fetch("date")).to equal(metadata.fetch("date"))
-
-    expect(detached.metadata.fetch("decimal")).to equal(metadata.fetch("decimal"))
+    expect(detached.metadata.fetch("nested")).not_to equal(metadata.fetch("nested"))
+    expect(detached.metadata.fetch("value_object")).to equal(value_object)
+    expect(detached.metadata.fetch("nested").first).to equal(application_object)
   end
 
   it "preserves arbitrary application metadata without invoking its behavior" do

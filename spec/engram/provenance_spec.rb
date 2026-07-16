@@ -519,17 +519,22 @@ RSpec.describe Engram::Provenance do
     end
   end
 
-  it "does not canonicalize unrelated metadata values" do
-    require "bigdecimal"
-    require "date"
-
-    date = Date.new(2025, 1, 2)
-    decimal = BigDecimal("1.25")
-    metadata = described_class.attach({"date" => date, "decimal" => decimal}, provenance)
+  it "does not canonicalize unrelated opaque application metadata values" do
+    value_class = Class.new do
+      def initialize(payload)
+        @payload = payload
+      end
+    end
+    value_object = value_class.new("application state")
+    application_object = Object.new
+    metadata = described_class.attach(
+      {"value_object" => value_object, "application_object" => application_object},
+      provenance
+    )
 
     expect(described_class.extract_for_persistence(metadata)).to eq(provenance)
-    expect(metadata.fetch("date")).to equal(date)
-    expect(metadata.fetch("decimal")).to equal(decimal)
+    expect(metadata.fetch("value_object")).to equal(value_object)
+    expect(metadata.fetch("application_object")).to equal(application_object)
   end
 
   it "reports whether any source is structurally marked ungrounded" do
