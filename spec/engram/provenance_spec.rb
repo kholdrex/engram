@@ -451,6 +451,34 @@ RSpec.describe Engram::Provenance do
     end
   end
 
+  it "accepts safely transcodable non-UTF-8 extension strings and rejects binary strings" do
+    transcodable = (+"\xE9").force_encoding("ISO-8859-1")
+    metadata = {
+      "_engram" => {"provenance" => provenance.to_h.merge("extension" => transcodable)}
+    }
+
+    expect(described_class.extract_for_persistence(metadata)).to eq(provenance)
+
+    metadata["_engram"]["provenance"]["extension"] = "\xFF".b
+    expect { described_class.extract_for_persistence(metadata) }
+      .to raise_error(Engram::Error, "malformed provenance: String values must have valid encoding")
+    expect(described_class.extract(metadata)).to be_nil
+  end
+
+  it "accepts safely transcodable non-UTF-8 extension keys and rejects binary keys" do
+    payload = provenance.to_h
+    payload[(+"\xE9").force_encoding("ISO-8859-1")] = true
+    metadata = {"_engram" => {"provenance" => payload}}
+
+    expect(described_class.extract_for_persistence(metadata)).to eq(provenance)
+
+    payload.delete((+"\xE9").force_encoding("ISO-8859-1"))
+    payload["\xFF".b] = true
+    expect { described_class.extract_for_persistence(metadata) }
+      .to raise_error(Engram::Error, "malformed provenance: object keys must have valid encoding")
+    expect(described_class.extract(metadata)).to be_nil
+  end
+
   it "rejects non-finite extension floats as non-JSON-native scalars" do
     [Float::NAN, Float::INFINITY, -Float::INFINITY].each do |scalar|
       metadata = {

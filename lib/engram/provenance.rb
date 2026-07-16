@@ -233,9 +233,9 @@ module Engram
       end
 
       # Detaches the provenance subtree into plain containers and trusted primitive
-      # leaves. Container subclasses retain their stored contents, and String
-      # subclasses retain their underlying bytes, but none retain singleton/subclass
-      # behavior. Other metadata is deliberately left untouched.
+      # leaves. Container subclasses retain their stored contents, while Strings are
+      # exposed without subclass behavior and canonicalized to UTF-8. Other metadata
+      # is deliberately left untouched.
       def detach_provenance_container(value, active = {}.compare_by_identity, depth = 0)
         if core_kind_of?(value, Hash)
           with_acyclic_container(value, active) do
@@ -297,7 +297,8 @@ module Engram
           # Bound String#to_s exposes a subclass's underlying string as an exact String;
           # bound #dup then removes any singleton methods from an exact String value.
           string = String.instance_method(:to_s).bind_call(value)
-          unless String.instance_method(:valid_encoding?).bind_call(string)
+          string = canonical_utf8_string(string)
+          unless string
             raise Engram::Error, "malformed provenance: String values must have valid encoding"
           end
 
@@ -320,13 +321,22 @@ module Engram
         else
           raise Engram::Error, "malformed provenance: object keys must be String or Symbol values"
         end
-        unless String.instance_method(:valid_encoding?).bind_call(string)
+        string = canonical_utf8_string(string)
+        unless string
           raise Engram::Error, "malformed provenance: object keys must have valid encoding"
         end
 
         String.instance_method(:dup).bind_call(string)
       rescue TypeError
         raise Engram::Error, "malformed provenance: object keys must be String or Symbol values"
+      end
+
+      def canonical_utf8_string(string)
+        return unless String.instance_method(:valid_encoding?).bind_call(string)
+
+        String.instance_method(:encode).bind_call(string, Encoding::UTF_8)
+      rescue EncodingError
+        nil
       end
 
       def with_acyclic_container(value, active)
