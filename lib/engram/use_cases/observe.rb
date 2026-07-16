@@ -103,6 +103,8 @@ module Engram
 
           candidate
         end
+      rescue Engram::Internal::CandidateIntegrity::Error => error
+        raise Engram::Error, error.message
       end
 
       def normalize_record(record)
@@ -155,7 +157,7 @@ module Engram
         detached_by_candidate = {}.compare_by_identity
         candidates.zip(detached_candidates) do |candidate, detached|
           candidate_budget[candidate] += 1
-          detached_by_candidate[candidate] ||= detached
+          (detached_by_candidate[candidate] ||= []) << detached
         end
         [candidate_budget, detached_by_candidate]
       end
@@ -273,7 +275,9 @@ module Engram
               "consolidator must return no more than one decision per candidate occurrence; " \
               "multiple decisions reference the same candidate"
           end
-          detached_candidate = detached_by_candidate.fetch(decision.candidate)
+          detached_candidate = detached_by_candidate.fetch(decision.candidate).fetch(
+            decision_counts.fetch(decision.candidate) - 1
+          )
           unless Engram::Internal::Scope.record_matches?(detached_candidate, scope)
             raise Engram::Error, "cannot move memory across scopes"
           end

@@ -19,9 +19,7 @@ module Engram
     end
 
     def to_record
-      exact_record = Object.instance_method(:instance_of?).bind_call(record, Engram::Record)
-      detached = Engram::Internal::CandidateIntegrity.new.detach(record)
-      source = exact_record ? record : detached
+      source = Engram::Internal::CandidateIntegrity.new.detach(record)
       attributes = Engram::Record::STATE_READERS.to_h do |attribute|
         [attribute, Engram::Record.instance_method(attribute).bind_call(source)]
       end

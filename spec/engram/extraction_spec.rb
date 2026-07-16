@@ -29,11 +29,61 @@ RSpec.describe Engram::Extraction do
     converted = described_class.new(record: record, provenance: provenance).to_record
 
     expect(converted).not_to equal(record)
-    expect(converted.embedding).to equal(record.embedding)
+    expect(converted.embedding).to eq(record.embedding)
+    expect(converted.embedding).not_to equal(record.embedding)
     expect(converted.metadata.dig("host", "kept")).to be(true)
     expect(Engram::EmbeddingMetadata.extract(converted.metadata)).to eq(embedding)
     expect(Engram::Provenance.extract(converted.metadata)).to eq(provenance)
     expect(record.metadata).to eq(metadata)
+  end
+
+  it "attaches ungrounded provenance through behavior-free metadata without laundering it" do
+    calls = []
+    hostile_hash = Class.new(Hash) do
+      define_method(:dup) do
+        calls << :dup
+        self
+      end
+      define_method(:delete) do |key|
+        calls << :delete
+        super(key)
+      end
+      define_method(:reject) do |&block|
+        calls << :reject
+        super(&block)
+      end
+      define_method(:merge) do |*arguments|
+        calls << :merge
+        super(*arguments).except("_engram")
+      end
+    end
+    reserved = hostile_hash.new
+    reserved["host"] = {"kept" => true}
+    metadata = hostile_hash.new
+    metadata["caller"] = {"kept" => true}
+    metadata["_engram"] = reserved
+    record = Engram::Record.new(content: "Tea", scope: "user:1", embedding: [0.0], metadata: metadata)
+    ungrounded = Engram::Provenance.new(
+      sources: [Engram::Provenance::Source.new(
+        source_id: "message:1", source_type: "message", message_index: 0, role: "user",
+        spans: [Engram::Provenance::Span.new(start_offset: 0, end_offset: 4)], alignment: :ungrounded
+      )],
+      extractor: provenance.extractor,
+      confidence: provenance.confidence
+    )
+    original_entries = Hash.instance_method(:transform_values).bind_call(metadata) { |value| value }
+    store = Engram::Adapters::InMemoryStore.new
+
+    converted = described_class.new(record: record, provenance: ungrounded).to_record
+    persisted = Engram::Persistence.new(store: store, embedder: Engram::Adapters::NullEmbedder.new).add(converted)
+
+    expect(converted.metadata).to be_instance_of(Hash)
+    expect(Engram::Provenance.extract(converted.metadata)).to eq(ungrounded)
+    expect(persisted).to be_nil
+    expect(store.all(scope: "user:1")).to be_empty
+    expect(calls).to be_empty
+    expect(Hash.instance_method(:each_pair).bind_call(metadata).to_a).to eq(original_entries.to_a)
+    expect(metadata.fetch("_engram")).to equal(reserved)
   end
 
   it "converts Record subclasses without invoking overridden type checks or readers" do

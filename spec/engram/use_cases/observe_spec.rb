@@ -145,6 +145,22 @@ RSpec.describe Engram::UseCases::Observe do
     expect(store.all(scope: "u:1")).to be_empty
   end
 
+  it "normalizes Extraction conversion integrity failures to Engram::Error" do
+    extracted_record = Engram::Record.new(content: "Invalid extraction", scope: "u:1", embedding: [0.0])
+    extracted_record.define_singleton_method(:metadata) { raise "must not be invoked" }
+    extracted = Engram::Extraction.new(record: extracted_record, provenance: provenance)
+    consolidator = double
+    expect(consolidator).not_to receive(:reconcile_all)
+
+    expect do
+      described_class.new(store: store, extractor: double(extract: [extracted]),
+        consolidator: consolidator, embedder: embedder)
+        .call(messages: ["turn"], scope: "u:1")
+    end.to raise_error(Engram::Error, /plain Engram::Record/)
+
+    expect(store.all(scope: "u:1")).to be_empty
+  end
+
   it "rejects invalid extractor containers and members before consolidation or store mutation" do
     valid = Engram::Record.new(content: "Candidate", scope: "u:1", embedding: [0.0])
     invalid_outputs = [nil, valid, [valid].each, [Object.new], [valid, nil]]
@@ -513,6 +529,24 @@ RSpec.describe Engram::UseCases::Observe do
     expect(applied.map(&:action)).to eq([:add])
     expect(applied.first.candidate).to equal(candidate)
     expect(store.all(scope: "u:1").map(&:content)).to eq(["Candidate"])
+  end
+
+  it "persists distinct records for add decisions on repeated candidate occurrences" do
+    embedder_without_metadata = Class.new do
+      def embed(_text) = [0.0]
+    end.new
+    candidate = Engram::Record.new(content: "Candidate", scope: "u:1", embedding: [0.0])
+    decisions = 2.times.map { Engram::Decision.new(action: :add, candidate: candidate) }
+    observe = described_class.new(store: store, extractor: double(extract: [candidate, candidate]),
+      consolidator: double(reconcile_all: decisions), embedder: embedder_without_metadata)
+
+    applied = observe.call(messages: ["turn"], scope: "u:1")
+    persisted = store.all(scope: "u:1")
+
+    expect(applied.map(&:action)).to eq(%i[add add])
+    expect(persisted.length).to eq(2)
+    expect(persisted.map(&:id).uniq.length).to eq(2)
+    expect(persisted.first).not_to equal(persisted.last)
   end
 
   it "rejects a consolidator that clears candidate metadata before authorizing deletion" do
