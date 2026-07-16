@@ -21,20 +21,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 - Persistence accepts records without provenance, rejects structurally ungrounded provenance
-  by default (configurable with `allow_ungrounded: true`), and fails closed on malformed or
+  by default (configurable only with the exact boolean `allow_ungrounded: true`), and fails closed on malformed or
   unknown future provenance during writes while keeping reads tolerant. Provenance validation
   does not verify source text, and source IDs are references rather than authorization
   boundaries. The built-in LLM extractor does not emit grounded provenance.
+- Existing `before_persist` hooks may continue to transform record content or embeddings, but
+  may neither add, remove, nor alter provenance; this restriction includes legacy records with
+  no provenance.
 - Extractors must return an `Array`; each result may be a plain `Engram::Record` or an
   `Engram::Extraction` carrying provenance.
 - Custom consolidator decisions must reference the actual same-scope `Engram::Record` instance
   supplied for reconciliation and must treat both the candidates array and records as read-only.
-  Engram now fails closed on collection replacement/reordering/iteration overrides and on nested
-  value, identity/alias/topology, frozen-state, custom-behavior, hidden-state, or exact `Date`,
-  `BigDecimal`, or `Time` changes before destructive authorization. Candidate values are
-  restricted to behavior-free nil/booleans, strings, symbols, integers, floats, big decimals,
-  dates, times, and acyclic plain arrays/hashes; custom, cyclic, default-proc hash, and
-  unsupported values are rejected before reconciliation.
+  Engram now fails closed on collection replacement/reordering/iteration overrides and on
+  security-relevant nested value, identity/alias/topology, frozen-state, custom-behavior, or
+  hidden-state changes before destructive authorization. Arbitrary application metadata values
+  remain opaque and preserve their identity without invoking equality or serialization behavior;
+  provenance is independently parsed and integrity-protected.
   Substituted, modified, missing, malformed, or cross-scope candidates fail closed.
   `Observe` preflights the complete decision batch, including persistence policy and hook
   transformations, before beginning store mutations.

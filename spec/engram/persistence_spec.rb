@@ -19,13 +19,15 @@ RSpec.describe Engram::Persistence do
     {"_engram" => {"provenance" => {"version" => 99}}}
   end
 
-  def provenance(alignment: :exact)
+  def provenance(alignment: :exact, source_id: "message:1", source_type: "message",
+    message_index: 0, role: "user", start_offset: 0, end_offset: 4,
+    extractor_name: "host", model: "model-1", confidence: 0.9)
     Engram::Provenance.new(
       sources: [Engram::Provenance::Source.new(
-        source_id: "message:1", source_type: "message", message_index: 0, role: "user",
-        spans: [Engram::Provenance::Span.new(start_offset: 0, end_offset: 4)], alignment: alignment
+        source_id: source_id, source_type: source_type, message_index: message_index, role: role,
+        spans: [Engram::Provenance::Span.new(start_offset: start_offset, end_offset: end_offset)], alignment: alignment
       )],
-      extractor: Engram::Provenance::Extractor.new(name: "host", model: "model-1"), confidence: 0.9
+      extractor: Engram::Provenance::Extractor.new(name: extractor_name, model: model), confidence: confidence
     )
   end
 
@@ -61,6 +63,12 @@ RSpec.describe Engram::Persistence do
       nested = (container_type == :hash) ? {"nested" => nested} : [nested]
     end
     {"_engram" => {"provenance" => provenance.to_h.merge("extension" => nested)}}
+  end
+
+  def scope_with_hostile_equality(value)
+    value = +value
+    value.define_singleton_method(:==) { |_other| true }
+    value
   end
 
   describe "#add" do
@@ -256,6 +264,17 @@ RSpec.describe Engram::Persistence do
       expect(store.all(scope: record.scope)).to be_empty
     end
 
+    it "rejects a hostile scope introduced by before_persist" do
+      hook = ->(candidate) { candidate.with(scope: scope_with_hostile_equality("u:victim")) }
+      persistence = described_class.new(store: store, embedder: Engram::Adapters::NullEmbedder.new,
+        before_persist: hook, persistence_policy: nil)
+
+      expect { persistence.add(record) }
+        .to raise_error(Engram::Error, "cannot move memory across scopes")
+      expect(store.all(scope: record.scope)).to be_empty
+      expect(store.all(scope: "u:victim")).to be_empty
+    end
+
     it "rejects before_persist laundering ungrounded provenance as legacy metadata" do
       candidate = record.with(metadata: Engram::Provenance.attach({}, provenance(alignment: :ungrounded)))
       hook = ->(transformed) { transformed.with(metadata: {}) }
@@ -277,6 +296,108 @@ RSpec.describe Engram::Persistence do
       expect { persistence.add(grounded) }
         .to raise_error(Engram::Error, /before_persist cannot change provenance trust/)
       expect(store.all(scope: record.scope)).to be_empty
+    end
+
+    it "rejects before_persist rewriting any supporting provenance evidence" do
+      grounded = record.with(metadata: Engram::Provenance.attach({}, provenance))
+      mutations = [
+        provenance(source_id: "message:other"), provenance(source_type: "document"),
+        provenance(message_index: 1), provenance(role: "assistant"),
+        provenance(start_offset: 1, end_offset: 5), provenance(alignment: :normalized),
+        provenance(extractor_name: "other"), provenance(model: "model-2"), provenance(confidence: 0.8)
+      ]
+
+      mutations.each do |changed|
+        hook = ->(transformed) { transformed.with(metadata: Engram::Provenance.attach({}, changed)) }
+        guarded = described_class.new(store: store, embedder: Engram::Adapters::NullEmbedder.new,
+          before_persist: hook, persistence_policy: nil)
+
+        expect { guarded.add(grounded) }
+          .to raise_error(Engram::Error, /before_persist cannot change provenance trust/)
+      end
+      expect(store.all(scope: record.scope)).to be_empty
+    end
+
+    it "rejects before_persist rewriting validated provenance extension evidence" do
+      payload = provenance.to_h.merge(
+        "evidence_digest" => "sha256:original",
+        "extension" => {"nested" => ["one", 2, true]}
+      )
+      grounded = record.with(metadata: {"_engram" => {"provenance" => payload}})
+      hook = lambda do |transformed|
+        changed = payload.merge("evidence_digest" => "sha256:rewritten")
+        transformed.with(metadata: {"_engram" => {"provenance" => changed}})
+      end
+      guarded = described_class.new(store: store, embedder: Engram::Adapters::NullEmbedder.new,
+        before_persist: hook, persistence_policy: nil)
+
+      expect { guarded.add(grounded) }
+        .to raise_error(Engram::Error, /before_persist cannot change provenance trust/)
+      expect(store.all(scope: record.scope)).to be_empty
+    end
+
+    it "rejects before_persist coercing integer confidence to an equal float" do
+      payload = provenance(confidence: 1).to_h
+      grounded = record.with(metadata: {"_engram" => {"provenance" => payload}})
+      hook = lambda do |transformed|
+        changed = payload.merge("confidence" => 1.0)
+        transformed.with(metadata: {"_engram" => {"provenance" => changed}})
+      end
+      guarded = described_class.new(store: store, embedder: Engram::Adapters::NullEmbedder.new,
+        before_persist: hook, persistence_policy: nil)
+
+      expect { guarded.add(grounded) }
+        .to raise_error(Engram::Error, /before_persist cannot change provenance trust/)
+      expect(store.all(scope: record.scope)).to be_empty
+    end
+
+    it "rejects before_persist changing an extension's negative zero float bits" do
+      payload = provenance.to_h.merge("extension" => {"signed_zero" => -0.0})
+      grounded = record.with(metadata: {"_engram" => {"provenance" => payload}})
+      hook = lambda do |transformed|
+        changed = payload.merge("extension" => {"signed_zero" => 0.0})
+        transformed.with(metadata: {"_engram" => {"provenance" => changed}})
+      end
+      guarded = described_class.new(store: store, embedder: Engram::Adapters::NullEmbedder.new,
+        before_persist: hook, persistence_policy: nil)
+
+      expect { guarded.add(grounded) }
+        .to raise_error(Engram::Error, /before_persist cannot change provenance trust/)
+      expect(store.all(scope: record.scope)).to be_empty
+    end
+
+    it "allows before_persist to preserve an exact integer and signed-zero payload" do
+      payload = provenance(confidence: 1).to_h.merge("extension" => {"signed_zero" => -0.0})
+      grounded = record.with(metadata: {"_engram" => {"provenance" => payload}})
+      hook = lambda do |transformed|
+        unchanged = payload.merge("extension" => {"signed_zero" => -0.0})
+        transformed.with(content: "User likes [REDACTED]",
+          metadata: {"_engram" => {"provenance" => unchanged}})
+      end
+      guarded = described_class.new(store: store, embedder: Engram::Adapters::NullEmbedder.new,
+        before_persist: hook, persistence_policy: nil)
+
+      persisted = guarded.add(grounded)
+
+      expect(persisted.content).to eq("User likes [REDACTED]")
+      expect(persisted.metadata.dig("_engram", "provenance")).to eq(payload)
+    end
+
+    it "allows content and embedding transforms when full extended provenance is unchanged" do
+      payload = provenance.to_h.merge(
+        "evidence_digest" => "sha256:original",
+        "extension" => {"nested" => ["one", 2, true]}
+      )
+      grounded = record.with(embedding: [1.0], metadata: {"_engram" => {"provenance" => payload}})
+      hook = ->(transformed) { transformed.with(content: "User likes [REDACTED]", embedding: [9.0]) }
+      guarded = described_class.new(store: store, embedder: Engram::Adapters::NullEmbedder.new,
+        before_persist: hook, persistence_policy: nil)
+
+      persisted = guarded.add(grounded)
+
+      expect(persisted.content).to eq("User likes [REDACTED]")
+      expect(persisted.embedding).to eq(Engram::Adapters::NullEmbedder.new.embed(persisted.content))
+      expect(persisted.metadata.dig("_engram", "provenance")).to eq(payload)
     end
 
     it "allows before_persist content redaction while preserving provenance" do
@@ -380,6 +501,21 @@ RSpec.describe Engram::Persistence do
           persistence.update(scope: candidate.scope, id: stored_record.id, record: candidate)
         }.to raise_error(Engram::Error, /before_persist cannot change provenance trust/)
         expect(store.all(scope: stored_record.scope).map(&:to_h)).to eq([original])
+      end
+
+      it "rejects a hostile scope introduced by before_persist without replacing a victim record" do
+        victim = stored_record
+        original = victim.to_h
+        candidate = victim.with(content: "Attacker replacement")
+        hook = ->(transformed) { transformed.with(scope: scope_with_hostile_equality("u:attacker")) }
+        guarded = described_class.new(store: store, embedder: Engram::Adapters::NullEmbedder.new,
+          before_persist: hook, persistence_policy: nil)
+
+        expect {
+          guarded.update(scope: victim.scope, id: victim.id, record: candidate)
+        }.to raise_error(Engram::Error, "cannot move memory across scopes")
+        expect(store.all(scope: victim.scope).map(&:to_h)).to eq([original])
+        expect(store.all(scope: "u:attacker")).to be_empty
       end
     end
   end

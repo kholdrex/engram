@@ -274,7 +274,9 @@ module Engram
               "multiple decisions reference the same candidate"
           end
           detached_candidate = detached_by_candidate.fetch(decision.candidate)
-          raise Engram::Error, "cannot move memory across scopes" unless detached_candidate.scope == scope
+          unless Engram::Internal::Scope.record_matches?(detached_candidate, scope)
+            raise Engram::Error, "cannot move memory across scopes"
+          end
 
           if %i[update forget].include?(decision.action) && !decision.target_id
             raise Engram::Error, "#{decision.action} decision requires a target_id"
@@ -334,7 +336,8 @@ module Engram
           persistence.allowed?(decision.candidate) if decision.target_id
         end
 
-        if %i[add update].include?(decision.action) && prepared && prepared.scope != scope
+        if %i[add update].include?(decision.action) && prepared &&
+            !Engram::Internal::Scope.record_matches?(prepared, scope)
           raise Engram::Error, "cannot move memory across scopes"
         end
 

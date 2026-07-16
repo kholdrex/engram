@@ -3,6 +3,8 @@
 module Engram
   # Applies persistence hooks and policy consistently before writing records.
   class Persistence
+    RECORD_METADATA_READER = Engram::Record.instance_method(:metadata)
+
     def initialize(store:, embedder:, before_persist: Engram.config.before_persist,
       persistence_policy: Engram.config.persistence_policy)
       @store = store
@@ -25,7 +27,9 @@ module Engram
       return unless record
 
       validate_provenance!(record)
-      raise Engram::Error, "cannot move memory across scopes" unless record.scope == scope
+      unless Engram::Internal::Scope.record_matches?(record, scope)
+        raise Engram::Error, "cannot move memory across scopes"
+      end
 
       @store.add(record)
     end
@@ -34,7 +38,9 @@ module Engram
       return unless record
 
       validate_provenance!(record)
-      raise Engram::Error, "cannot move memory across scopes" unless record.scope == scope
+      unless Engram::Internal::Scope.record_matches?(record, scope)
+        raise Engram::Error, "cannot move memory across scopes"
+      end
 
       @store.update(scope: scope, id: id, record: record)
     end
@@ -78,12 +84,14 @@ module Engram
     private
 
     def validate_provenance!(record)
-      Engram::Provenance.extract_for_persistence(record.metadata)
+      metadata = RECORD_METADATA_READER.bind_call(record)
+      Engram::Provenance.canonical_integrity_representation_for_persistence(metadata)
+    rescue TypeError
+      raise Engram::Error, "persistence requires an Engram::Record"
     end
 
     def validate_provenance_trust!(original, transformed)
-      return unless original
-      return if original.ungrounded? == transformed&.ungrounded?
+      return if original == transformed
 
       raise Engram::Error, "before_persist cannot change provenance trust"
     end

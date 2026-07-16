@@ -42,6 +42,25 @@ RSpec.describe Engram::UseCases::Observe do
       .call(messages: ["turn"], scope: "u:1")
   end
 
+  it "preserves arbitrary application metadata from custom extractors" do
+    value_class = Struct.new(:account_id)
+    object = Object.new
+    value_object = value_class.new(42)
+    extracted = Engram::Record.new(content: "Custom candidate", scope: "u:1", embedding: [0.0],
+      metadata: {"object" => object, "value_object" => value_object})
+    consolidator = double
+    expect(consolidator).to receive(:reconcile_all) do |candidates:, **|
+      [Engram::Decision.new(action: :add, candidate: candidates.first)]
+    end
+
+    described_class.new(store: store, extractor: double(extract: [extracted]),
+      consolidator: consolidator, embedder: embedder).call(messages: ["turn"], scope: "u:1")
+
+    persisted = store.all(scope: "u:1").first
+    expect(persisted.metadata.fetch("object")).to equal(object)
+    expect(persisted.metadata.fetch("value_object")).to equal(value_object)
+  end
+
   it "normalizes Record subclasses to plain records before candidate integrity checks" do
     record_class = Class.new(Engram::Record) do
       def id
@@ -61,6 +80,22 @@ RSpec.describe Engram::UseCases::Observe do
 
     expect(applied.map(&:action)).to eq([:add])
     expect(store.all(scope: "u:1").map(&:content)).to eq(["Subclass candidate"])
+  end
+
+  it "rejects default-proc metadata while normalizing Record subclasses" do
+    record_class = Class.new(Engram::Record)
+    metadata = Hash.new { |_hash, key| "generated:#{key}" }
+    extracted = record_class.new(content: "Subclass candidate", scope: "u:1", embedding: [0.0], metadata: metadata)
+    consolidator = double
+    expect(consolidator).not_to receive(:reconcile_all)
+
+    expect do
+      described_class.new(store: store, extractor: double(extract: [extracted]),
+        consolidator: consolidator, embedder: embedder)
+        .call(messages: ["turn"], scope: "u:1")
+    end.to raise_error(Engram::Error, /Hash with a default proc/)
+
+    expect(store.all(scope: "u:1")).to be_empty
   end
 
   it "rejects singleton Record behavior without invoking an overridden id reader" do
@@ -282,6 +317,29 @@ RSpec.describe Engram::UseCases::Observe do
     end
   end
 
+  it "rejects opaque-container provenance mutation before destructive authorization" do
+    target = store.add(Engram::Record.new(content: "Old", scope: "u:1", embedding: [0.0]))
+    metadata = Engram::Provenance.attach({}, provenance)
+    opaque_reserved = Class.new(Hash).new
+    opaque_reserved.replace(metadata.fetch("_engram"))
+    metadata["_engram"] = opaque_reserved
+    candidate = Engram::Record.new(content: "Correction", scope: "u:1", embedding: [0.0], metadata: metadata)
+    policy = double
+    expect(policy).not_to receive(:allow_destructive?)
+    Engram.config.persistence_policy = policy
+    consolidator = double
+    expect(consolidator).to receive(:reconcile_all) do |candidates:, **|
+      opaque_reserved.fetch("provenance").fetch("sources").first["source_id"] = "message:other"
+      [Engram::Decision.new(action: :forget, candidate: candidates.first, target_id: target.id)]
+    end
+    observe = described_class.new(store: store, extractor: double(extract: [candidate]),
+      consolidator: consolidator, embedder: embedder)
+
+    expect { observe.call(messages: ["turn"], scope: "u:1") }
+      .to raise_error(Engram::Error, /consolidators must not mutate candidates/)
+    expect(store.all(scope: "u:1")).to eq([target])
+  end
+
   it "validates only a forget decision's candidate without invoking write hooks" do
     malformed_target = store.add(Engram::Record.new(content: "Old", scope: "u:1", embedding: [0.0],
       metadata: {"_engram" => {"provenance" => {"version" => 99}}}))
@@ -377,6 +435,23 @@ RSpec.describe Engram::UseCases::Observe do
 
     expect { observe.call(messages: ["attack"], scope: "u:1") }
       .to raise_error(Engram::Error, "cannot move memory across scopes")
+    expect(store.all(scope: "u:1")).to eq([target])
+  end
+
+  it "rejects behavior-bearing candidate scope before reconciliation" do
+    target = store.add(Engram::Record.new(content: "Private", scope: "u:1", embedding: [0.0]))
+    hostile_scope = Object.new
+    hostile_scope.define_singleton_method(:==) { |_other| true }
+    candidate = Engram::Record.new(content: "Attack", scope: hostile_scope, embedding: [0.0])
+    consolidator = double
+    expect(consolidator).not_to receive(:reconcile_all)
+
+    expect do
+      described_class.new(store: store, extractor: double(extract: [candidate]),
+        consolidator: consolidator, embedder: embedder)
+        .call(messages: ["attack"], scope: "u:1")
+    end.to raise_error(Engram::Error, /scope/)
+
     expect(store.all(scope: "u:1")).to eq([target])
   end
 
@@ -688,6 +763,46 @@ RSpec.describe Engram::UseCases::Observe do
     expect { observe.call(messages: ["turn"], scope: "u:1") }
       .to raise_error(Engram::Error, /unsupported provenance version 99/)
     expect(store.all(scope: "u:1")).to be_empty
+  end
+
+  it "preflights a hook-injected hostile scope before applying an earlier decision" do
+    first = Engram::Record.new(content: "Safe", scope: "u:1", embedding: [0.0])
+    second = Engram::Record.new(content: "Hostile later", scope: "u:1", embedding: [0.0])
+    hostile_scope = +"u:2"
+    hostile_scope.define_singleton_method(:==) { |_other| true }
+    Engram.config.before_persist = lambda do |candidate|
+      (candidate.content == second.content) ? candidate.with(scope: hostile_scope) : candidate
+    end
+    decisions = [first, second].map { |candidate| Engram::Decision.new(action: :add, candidate: candidate) }
+    observe = described_class.new(store: store, extractor: double(extract: [first, second]),
+      consolidator: double(reconcile_all: decisions), embedder: embedder)
+
+    expect { observe.call(messages: ["turn"], scope: "u:1") }
+      .to raise_error(Engram::Error, /cannot move memory across scopes/)
+    expect(store.all(scope: "u:1")).to be_empty
+    expect(store.all(scope: "u:2")).to be_empty
+  end
+
+  it "preflights a hostile scope injected into an update before applying an earlier add" do
+    target = store.add(Engram::Record.new(content: "Old", scope: "u:1", embedding: [0.0]))
+    first = Engram::Record.new(content: "Safe", scope: "u:1", embedding: [0.0])
+    second = Engram::Record.new(content: "Hostile update", scope: "u:1", embedding: [0.0])
+    hostile_scope = +"u:2"
+    hostile_scope.define_singleton_method(:==) { |_other| true }
+    Engram.config.before_persist = lambda do |candidate|
+      (candidate.content == second.content) ? candidate.with(scope: hostile_scope) : candidate
+    end
+    decisions = [
+      Engram::Decision.new(action: :add, candidate: first),
+      Engram::Decision.new(action: :update, candidate: second, target_id: target.id)
+    ]
+    observe = described_class.new(store: store, extractor: double(extract: [first, second]),
+      consolidator: double(reconcile_all: decisions), embedder: embedder)
+
+    expect { observe.call(messages: ["turn"], scope: "u:1") }
+      .to raise_error(Engram::Error, /cannot move memory across scopes/)
+    expect(store.all(scope: "u:1")).to eq([target])
+    expect(store.all(scope: "u:2")).to be_empty
   end
 
   it "preflights provenance trust laundering before applying an earlier decision" do

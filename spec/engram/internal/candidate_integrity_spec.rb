@@ -65,28 +65,117 @@ RSpec.describe Engram::Internal::CandidateIntegrity do
     expect(integrity.verify!(candidates, snapshot)).to be_nil
     expect(detached.metadata).to eq(metadata)
     expect(detached.metadata).not_to equal(metadata)
-    expect(detached.metadata.fetch("date")).not_to equal(metadata.fetch("date"))
+    expect(detached.metadata.fetch("date")).to equal(metadata.fetch("date"))
 
-    metadata.fetch("date").freeze
+    expect(detached.metadata.fetch("decimal")).to equal(metadata.fetch("decimal"))
+  end
+
+  it "preserves arbitrary application metadata without invoking its behavior" do
+    value_class = Class.new do
+      def ==(_other) = raise("application equality must not run")
+      def hash = raise("application hash must not run")
+      def to_s = raise("application serialization must not run")
+    end
+    object = Object.new
+    value_object = value_class.new
+    candidate = record(metadata: {"object" => object, "value_object" => value_object})
+    candidates = [candidate]
+
+    snapshot = integrity.snapshot(candidates)
+    detached = integrity.detach(candidate)
+
+    expect(integrity.verify!(candidates, snapshot)).to be_nil
+    expect(detached.metadata).not_to equal(candidate.metadata)
+    expect(detached.metadata.fetch("object")).to equal(object)
+    expect(detached.metadata.fetch("value_object")).to equal(value_object)
+  end
+
+  it "rejects opaque or behavior-bearing values in every non-metadata Record field" do
+    hostile_class = Class.new do
+      def ==(_other) = raise("candidate equality must not run")
+      def to_s = raise("candidate coercion must not run")
+    end
+
+    {
+      id: hostile_class.new,
+      content: hostile_class.new,
+      scope: hostile_class.new,
+      embedding: [hostile_class.new],
+      kind: hostile_class.new,
+      importance: hostile_class.new,
+      created_at: hostile_class.new,
+      last_accessed_at: hostile_class.new
+    }.each do |attribute, hostile|
+      candidate = record
+      candidate.instance_variable_set(:"@#{attribute}", hostile)
+
+      expect { integrity.snapshot([candidate]) }
+        .to raise_error(described_class::InvalidStateError, /candidate #{attribute}/)
+    end
+  end
+
+  it "detaches nested hash values without rehashing arbitrary application keys" do
+    key = Object.new
+    nested = {"nested" => ["value"]}
+    metadata = {key => nested}
+    key.define_singleton_method(:hash) { raise "application hash must not run" }
+    key.define_singleton_method(:eql?) { |_other| raise "application equality must not run" }
+    key.define_singleton_method(:to_s) { raise "application serialization must not run" }
+    candidate = record(metadata: metadata)
+
+    detached = integrity.detach(candidate)
+    detached_key, detached_value = Hash.instance_method(:each_pair).bind_call(detached.metadata).first
+
+    expect(detached_key).to equal(key)
+    expect(detached_value).not_to equal(nested)
+    expect(detached_value.fetch("nested")).not_to equal(nested.fetch("nested"))
+  end
+
+  it "rejects bound Hash default procs when detaching metadata directly" do
+    hash_class = Class.new(Hash) do
+      def default_proc = raise("custom default_proc must not run")
+    end
+    metadata = {"nested" => hash_class.new { |_hash, key| "generated:#{key}" }}
+    candidate = record(metadata: metadata)
+
+    expect { integrity.detach(candidate) }
+      .to raise_error(described_class::InvalidStateError, /Hash with a default proc/)
+  end
+
+  it "detects provenance evidence mutation inside an otherwise opaque Hash subclass" do
+    provenance = Engram::Provenance.new(
+      sources: [Engram::Provenance::Source.new(
+        source_id: "message:1", source_type: "message", message_index: 0, role: "user",
+        spans: [Engram::Provenance::Span.new(start_offset: 0, end_offset: 4)], alignment: :exact
+      )],
+      extractor: Engram::Provenance::Extractor.new(name: "host", model: "model-1"), confidence: 0.9
+    )
+    metadata = Engram::Provenance.attach({}, provenance)
+    opaque_reserved = Class.new(Hash).new
+    opaque_reserved.replace(metadata.fetch("_engram"))
+    metadata["_engram"] = opaque_reserved
+    candidate = record(metadata: metadata)
+    candidates = [candidate]
+    snapshot = integrity.snapshot(candidates)
+
+    opaque_reserved.fetch("provenance").fetch("sources").first["source_id"] = "message:other"
+
     expect { integrity.verify!(candidates, snapshot) }
       .to raise_error(described_class::MutationError, described_class::CANDIDATE_MUTATION_MESSAGE)
   end
 
-  it "rejects unsupported custom and unmarshalable values when taking the snapshot" do
+  it "accepts opaque custom and unmarshalable metadata values" do
     io = IO.new(IO.sysopen(File::NULL))
     unsupported = [Object.new, BasicObject.new, proc {}, io]
 
     begin
-      unsupported.each do |value|
-        expect { integrity.snapshot([record(metadata: {"value" => value})]) }
-          .to raise_error(described_class::InvalidStateError, /unsupported candidate value/)
-      end
+      unsupported.each { |value| expect { integrity.snapshot([record(metadata: {"value" => value})]) }.not_to raise_error }
     ensure
       io.close
     end
   end
 
-  it "rejects custom equality, private singleton behavior, and extended behavior" do
+  it "preserves behavior-bearing metadata leaves as opaque values" do
     values = 3.times.map { +"value" }
     values[0].define_singleton_method(:==) { |_other| true }
     values[1].singleton_class.send(:define_method, :hidden) { true }
@@ -95,8 +184,13 @@ RSpec.describe Engram::Internal::CandidateIntegrity do
     values[2].extend(extension)
 
     values.each do |value|
-      expect { integrity.snapshot([record(metadata: {"value" => value})]) }
-        .to raise_error(described_class::InvalidStateError, /custom behavior/)
+      candidate = record(metadata: {"value" => value})
+      candidates = [candidate]
+      snapshot = integrity.snapshot(candidates)
+      detached = integrity.detach(candidate)
+
+      expect(integrity.verify!(candidates, snapshot)).to be_nil
+      expect(detached.metadata.fetch("value")).to equal(value)
     end
   end
 

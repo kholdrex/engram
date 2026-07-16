@@ -77,6 +77,27 @@ RSpec.describe Engram::PersistencePolicy do
     expect(policy.call(record("Claim", metadata: metadata))).to be_a(Engram::Record)
   end
 
+  it "requires the ungrounded override to be exactly true" do
+    metadata = Engram::Provenance.attach({}, provenance(alignment: :ungrounded))
+
+    ["true", "false", 1, 0, Object.new].each do |override|
+      configured = described_class.new(allow_ungrounded: override)
+      candidate = record("Claim", metadata: metadata)
+
+      expect(configured.call(candidate)).to be_nil
+      expect(configured.allow_destructive?(candidate)).to be(false)
+    end
+  end
+
+  it "does not dispatch through a hostile ungrounded override's equal? method" do
+    override = Object.new
+    override.define_singleton_method(:equal?) { |_other| raise "application equality must not run" }
+    metadata = Engram::Provenance.attach({}, provenance(alignment: :ungrounded))
+    configured = described_class.new(allow_ungrounded: override)
+
+    expect(configured.call(record("Claim", metadata: metadata))).to be_nil
+  end
+
   it "raises rather than writing malformed or unsupported provenance" do
     malformed = {"_engram" => {"provenance" => {"version" => 1, "sources" => []}}}
     future = {"_engram" => {"provenance" => {"version" => 99}}}

@@ -52,7 +52,7 @@ chat.ask("Why am I being rate limited?")
 
 ## Feature overview
 
-- Pure Ruby core with BigDecimal as its only runtime dependency and in-memory defaults for tests and local development.
+- Pure Ruby core with zero runtime dependencies and in-memory defaults for tests and local development.
 - Rails `has_memory` macro, install generator, and background `observe_later` job.
 - Postgres + pgvector storage through an optional ActiveRecord/neighbor adapter.
 - RubyLLM embedder and completion adapters for provider-backed embeddings and extraction.
@@ -103,7 +103,7 @@ Use `CHANGELOG.md` as the authoritative source for breaking/compatibility change
 gem "engram"
 ```
 
-The core depends only on BigDecimal and does not require Rails, ActiveRecord, or a database. Optional adapters need host-app dependencies:
+The core has zero runtime dependencies and does not require Rails, ActiveRecord, or a database. Optional adapters need host-app dependencies:
 
 - `Engram::Adapters::PgvectorStore` → ActiveRecord + `neighbor` + Postgres/pgvector
 - `Engram::Adapters::RubyLLMEmbedder` and `Engram::Adapters::RubyLLMCompletion` → `ruby_llm`
@@ -293,23 +293,20 @@ memory.observe([
 
 ### Custom consolidator candidate contract
 
-`reconcile_all(candidates:, scope:)` receives a read-only, plain `Array` of read-only,
-plain `Engram::Record` instances. A custom consolidator may inspect candidates and return
-decisions that reference those exact instances, but it must not replace, append, remove, or
-reorder collection entries; override collection iteration; add collection or record state or
-behavior; or mutate, replace, freeze, or otherwise change any candidate value. Engram verifies
-this contract before it authorizes any add, update, or deletion and fails closed on a violation.
+`reconcile_all(candidates:, scope:)` receives a plain `Array` of plain `Engram::Record`
+instances. A custom consolidator may inspect candidates and return decisions that reference
+those exact instances, but it must not replace, append, remove, or reorder collection entries;
+override collection iteration; add collection or record state or behavior; or mutate the
+records. Engram verifies record and collection integrity before it authorizes any add, update,
+or deletion and fails closed on a violation.
 
-The supported candidate value domain is exact `nil`, `true`/`false`, `String`, `Symbol`,
-`Integer`, `Float`, `BigDecimal`, `Date`, `Time`, and recursively nested plain `Array` and
-plain `Hash` values.
-Containers must be acyclic; hashes cannot have default procs. Object identity, aliases and
-topology, hash defaults/mode/order, string encoding and bytes, frozen state, full `Date` value
-and calendar start, exact `BigDecimal` value, and full `Time` value/mode (including
-subnanosecond precision) are integrity-protected. Subclasses, singleton
-or extended methods (including private methods), extra instance variables, cycles, procs, IO,
-and other custom or unsupported values are rejected before reconciliation. Custom extractors
-should construct plain records from this domain rather than attaching application objects.
+Plain arrays and hashes in candidate state are detached without serializing their leaves.
+Core scalar/container state is integrity-protected without dispatching overridden traversal or
+equality. Arbitrary application metadata values (including value objects, procs, and IO) remain
+opaque, retain their identity, and are never compared or serialized by the integrity check.
+Their internal mutable state is consequently outside that check; provenance remains parsed and
+validated independently before any authorization. Containers must be acyclic, hashes cannot
+have default procs, and behavior-bearing core values remain unsupported.
 Extracted candidates must also have a nil `id`: IDs are store-owned and are allocated only
 when an add is persisted.
 

@@ -18,7 +18,7 @@ module Engram
 
     def initialize(denylist_patterns: [], allow_ungrounded: false)
       @denylist_patterns = denylist_patterns
-      @allow_ungrounded = allow_ungrounded
+      @allow_ungrounded = BasicObject.instance_method(:equal?).bind_call(allow_ungrounded, true)
     end
 
     def call(record)

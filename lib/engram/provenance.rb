@@ -183,6 +183,13 @@ module Engram
       # tolerate malformed or future schemas, but an older writer must not silently
       # persist provenance it cannot validate.
       def extract_for_persistence(metadata)
+        data = canonical_payload_for_persistence(metadata)
+        data && from_h(data)
+      end
+
+      # Returns a behavior-free canonical copy of the complete validated payload,
+      # including extension fields which the value object intentionally does not expose.
+      def canonical_payload_for_persistence(metadata)
         metadata ||= {}
         return nil unless core_kind_of?(metadata, Hash)
 
@@ -206,7 +213,18 @@ module Engram
           raise Engram::Error, "unsupported provenance version #{data["version"].inspect}"
         end
 
+        # Validate the known schema while retaining the already detached extension data.
         from_h(data)
+        data
+      end
+
+      # Represents the complete canonical payload without relying on value #==, #eql?,
+      # or #hash implementations. Explicit structural and scalar tags preserve key,
+      # value, and container roles. Integers remain distinct from Floats, whose packed
+      # IEEE 754 bits preserve distinctions such as negative zero.
+      def canonical_integrity_representation_for_persistence(metadata)
+        data = canonical_payload_for_persistence(metadata)
+        data && provenance_integrity_representation(data)
       end
 
       private
@@ -305,6 +323,41 @@ module Engram
           return String.instance_method(:dup).bind_call(string)
         end
 
+        raise Engram::Error, "malformed provenance: scalar values must be JSON-native primitives"
+      rescue TypeError
+        raise Engram::Error, "malformed provenance: scalar values must be JSON-native primitives"
+      end
+
+      def provenance_integrity_representation(value)
+        value_class = Object.instance_method(:class).bind_call(value)
+        if value_class.equal?(Hash)
+          fields = {}
+          Hash.instance_method(:each_pair).bind_call(value) do |key, nested|
+            fields[key] = provenance_integrity_representation(nested)
+          end
+          return [:object, fields]
+        end
+        if value_class.equal?(Array)
+          entries = []
+          Array.instance_method(:each).bind_call(value) do |nested|
+            entries << provenance_integrity_representation(nested)
+          end
+          return [:array, entries]
+        end
+        return [:null] if value_class.equal?(NilClass)
+        return [:boolean, true] if value_class.equal?(TrueClass)
+        return [:boolean, false] if value_class.equal?(FalseClass)
+        if value_class.equal?(Integer)
+          return [:integer, Integer.instance_method(:to_s).bind_call(value)]
+        end
+        if value_class.equal?(Float)
+          bits = Array.instance_method(:pack).bind_call([value], "G")
+          return [:float, bits]
+        end
+        return [:symbol, Symbol.instance_method(:to_s).bind_call(value)] if value_class.equal?(Symbol)
+        return [:string, value] if value_class.equal?(String)
+
+        # canonical_payload_for_persistence has already rejected every other type.
         raise Engram::Error, "malformed provenance: scalar values must be JSON-native primitives"
       rescue TypeError
         raise Engram::Error, "malformed provenance: scalar values must be JSON-native primitives"

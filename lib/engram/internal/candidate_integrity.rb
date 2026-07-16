@@ -1,16 +1,13 @@
 # frozen_string_literal: true
 
-require "bigdecimal"
-require "date"
-
 module Engram
   module Internal
     # Captures reconciliation candidates and verifies that an untrusted custom
     # consolidator treated both the records and their collection as read-only.
     #
-    # This intentionally supports only the exact, behavior-free value domain
-    # documented for custom consolidators. Core-method binding prevents custom
-    # equality, traversal, and serialization hooks from hiding mutations.
+    # Core-method binding prevents custom equality, traversal, and serialization
+    # hooks from hiding mutations. Arbitrary application metadata leaves are opaque:
+    # their identity is retained without executing application behavior.
     class CandidateIntegrity
       class Error < StandardError; end
       class InvalidStateError < Error; end
@@ -23,6 +20,16 @@ module Engram
         [attribute, Engram::Record.instance_method(attribute)]
       end.freeze
       RECORD_INSTANCE_VARIABLES = Engram::Record::STATE_READERS.map { |attribute| :"@#{attribute}" }.freeze
+
+      RECORD_FIELD_CLASSES = {
+        id: [NilClass, Integer, String],
+        content: [String],
+        scope: [String],
+        kind: [Symbol],
+        importance: [Integer, Float],
+        created_at: [Time],
+        last_accessed_at: [NilClass, Time]
+      }.freeze
 
       Snapshot = Struct.new(:collection, :collection_state, :records)
       private_constant :Snapshot
@@ -67,12 +74,14 @@ module Engram
         nil
       end
 
-      # Returns a deep, behavior-free copy whose nested state shares no mutable
-      # references with the candidate supplied to an untrusted consolidator.
+      # Returns a structurally detached copy. Plain containers and core mutable
+      # values do not share references; opaque application leaves retain identity.
       def detach(candidate)
         validate_detachable_record!(candidate)
         attributes = RECORD_STATE_READERS.to_h do |attribute, reader|
-          [attribute, duplicate_value(reader.bind_call(candidate))]
+          value = reader.bind_call(candidate)
+          validate_record_field!(attribute, value)
+          [attribute, attribute.equal?(:metadata) ? duplicate_metadata_value(value) : duplicate_value(value)]
         end
         Engram::Record.new(**attributes)
       end
@@ -81,11 +90,13 @@ module Engram
 
       def duplicate_value(value, active = {}.compare_by_identity)
         value_class = plain_class(value)
+        return value unless supported_value_class?(value_class)
+
         if custom_behavior?(value, value_class) || !Object.instance_method(:instance_variables).bind_call(value).empty?
           raise InvalidStateError, "unsupported candidate value"
         end
 
-        if value_class.equal?(String) || value_class.equal?(Time) || value_class.equal?(Date)
+        if value_class.equal?(String) || value_class.equal?(Time)
           Object.instance_method(:dup).bind_call(value)
         elsif value_class.equal?(Array)
           with_acyclic_value(value, active) do
@@ -107,10 +118,11 @@ module Engram
         raise InvalidStateError, "unsupported candidate value Hash with a default proc" if default_proc
 
         with_acyclic_value(value, active) do
-          copy = {}
-          copy.compare_by_identity if Hash.instance_method(:compare_by_identity?).bind_call(value)
-          Hash.instance_method(:each_pair).bind_call(value) do |key, nested_value|
-            copy[duplicate_value(key, active)] = duplicate_value(nested_value, active)
+          # Hash#transform_values copies the core table and preserves its existing keys
+          # without hashing, comparing, serializing, or otherwise dispatching through
+          # application key behavior. Values still pass through our structural copier.
+          copy = Hash.instance_method(:transform_values).bind_call(value) do |nested_value|
+            duplicate_value(nested_value, active)
           end
           copy.default = duplicate_value(Hash.instance_method(:default).bind_call(value), active)
           copy
@@ -170,12 +182,137 @@ module Engram
         end
 
         [frozen?(candidate), RECORD_STATE_READERS.to_h do |attribute, reader|
-          [attribute, canonical_value(reader.bind_call(candidate))]
-        end]
+          value = reader.bind_call(candidate)
+          validate_record_field!(attribute, value)
+          canonical = attribute.equal?(:metadata) ? canonical_metadata_value(value) : canonical_value(value)
+          [attribute, canonical]
+        end, provenance_evidence(RECORD_STATE_READERS.fetch(:metadata).bind_call(candidate))]
+      end
+
+      # Provenance is security evidence rather than arbitrary application metadata.
+      # Parse it independently so an opaque Hash subclass cannot hide changes to the
+      # schema fields used for persistence and destructive authorization. Invalid and
+      # future schemas remain opaque-compatible here: write paths reject them, while a
+      # noop observation may continue without CandidateIntegrity rejecting it early.
+      def provenance_evidence(metadata)
+        provenance = Engram::Provenance.canonical_payload_for_persistence(metadata)
+        provenance ? [:valid, provenance] : [:absent]
+      rescue Engram::Error
+        [:invalid]
+      end
+
+      def validate_record_field!(attribute, value)
+        if attribute.equal?(:metadata)
+          unless core_container?(value, Hash)
+            raise InvalidStateError, "candidate metadata must be a Hash"
+          end
+          return
+        end
+
+        if attribute.equal?(:embedding)
+          validate_embedding!(value)
+          return
+        end
+
+        value_class = plain_class(value)
+        allowed = RECORD_FIELD_CLASSES.fetch(attribute)
+        unless allowed.any? { |klass| value_class.equal?(klass) }
+          raise InvalidStateError, "candidate #{attribute} has an unsupported value"
+        end
+        canonical_value(value)
+      end
+
+      def validate_embedding!(value)
+        return if plain_class(value).equal?(NilClass)
+        unless plain_class(value).equal?(Array)
+          raise InvalidStateError, "candidate embedding must be a plain Array of numbers or nil"
+        end
+
+        canonical_value(value)
+        Array.instance_method(:each).bind_call(value) do |element|
+          element_class = plain_class(element)
+          unless element_class.equal?(Integer) || element_class.equal?(Float)
+            raise InvalidStateError, "candidate embedding must be a plain Array of numbers or nil"
+          end
+        end
+      end
+
+      # Metadata containers are structural even when subclassed: bound core traversal
+      # ignores their behavior. Only non-container application leaves remain opaque.
+      def canonical_metadata_value(value, active = {}.compare_by_identity)
+        if core_container?(value, Hash)
+          default_proc = Hash.instance_method(:default_proc).bind_call(value)
+          raise InvalidStateError, "unsupported candidate value Hash with a default proc" if default_proc
+
+          with_acyclic_value(value, active) do
+            entries = []
+            Hash.instance_method(:each_pair).bind_call(value) do |key, nested_value|
+              entries << [canonical_metadata_value(key, active), canonical_metadata_value(nested_value, active)]
+            end
+            default = canonical_metadata_value(Hash.instance_method(:default).bind_call(value), active)
+            [:metadata_hash, identity(value), frozen?(value),
+              Hash.instance_method(:compare_by_identity?).bind_call(value), default, entries]
+          end
+        elsif core_container?(value, Array)
+          with_acyclic_value(value, active) do
+            elements = []
+            Array.instance_method(:each).bind_call(value) do |element|
+              elements << canonical_metadata_value(element, active)
+            end
+            [:metadata_array, identity(value), frozen?(value), elements]
+          end
+        else
+          value_class = plain_class(value)
+          if !supported_value_class?(value_class) || custom_behavior?(value, value_class) ||
+              !Object.instance_method(:instance_variables).bind_call(value).empty?
+            [:opaque, identity(value)]
+          else
+            canonical_value(value, active)
+          end
+        end
+      end
+
+      def duplicate_metadata_value(value, active = {}.compare_by_identity)
+        if core_container?(value, Hash)
+          default_proc = Hash.instance_method(:default_proc).bind_call(value)
+          raise InvalidStateError, "unsupported candidate value Hash with a default proc" if default_proc
+
+          with_acyclic_value(value, active) do
+            copy = Hash.instance_method(:transform_values).bind_call(value) do |nested_value|
+              duplicate_metadata_value(nested_value, active)
+            end
+            copy.default = duplicate_metadata_value(Hash.instance_method(:default).bind_call(value), active)
+            copy
+          end
+        elsif core_container?(value, Array)
+          with_acyclic_value(value, active) do
+            copy = []
+            Array.instance_method(:each).bind_call(value) do |element|
+              copy << duplicate_metadata_value(element, active)
+            end
+            copy
+          end
+        else
+          value_class = plain_class(value)
+          if !supported_value_class?(value_class) || custom_behavior?(value, value_class) ||
+              !Object.instance_method(:instance_variables).bind_call(value).empty?
+            value
+          else
+            duplicate_value(value, active)
+          end
+        end
+      end
+
+      def core_container?(value, klass)
+        Object.instance_method(:is_a?).bind_call(value, klass)
+      rescue TypeError
+        false
       end
 
       def canonical_value(value, active = {}.compare_by_identity)
         value_class = plain_class(value)
+        return [:opaque, identity(value)] unless supported_value_class?(value_class)
+
         if custom_behavior?(value, value_class)
           raise InvalidStateError, "unsupported candidate value with custom behavior"
         end
@@ -199,10 +336,6 @@ module Engram
           [:integer, value.to_s]
         elsif value_class.equal?(Float)
           [:float, [value].pack("G")]
-        elsif value_class.equal?(BigDecimal)
-          canonical_big_decimal(value)
-        elsif value_class.equal?(Date)
-          canonical_date(value)
         elsif value_class.equal?(Time)
           canonical_time(value)
         elsif value_class.equal?(Array)
@@ -240,7 +373,13 @@ module Engram
       def plain_class(value)
         Object.instance_method(:class).bind_call(value)
       rescue TypeError
-        raise InvalidStateError, "unsupported candidate value"
+        nil
+      end
+
+      def supported_value_class?(value_class)
+        [NilClass, TrueClass, FalseClass, String, Symbol, Integer, Float, Time, Array, Hash].any? do |klass|
+          value_class.equal?(klass)
+        end
       end
 
       def custom_behavior?(value, value_class)
@@ -269,25 +408,6 @@ module Engram
           singleton_methods.length != class_methods.length ||
             singleton_methods.any? { |method_name| !class_methods.include?(method_name) }
         end
-      end
-
-      def canonical_date(value)
-        start = Date.instance_method(:start).bind_call(value)
-        [:date, identity(value), frozen?(value),
-          Date.instance_method(:jd).bind_call(value), canonical_date_start(start)]
-      end
-
-      def canonical_date_start(value)
-        value_class = Object.instance_method(:class).bind_call(value)
-        return [:float, [value].pack("G")] if value_class.equal?(Float)
-        return [:integer, value.to_s] if value_class.equal?(Integer)
-
-        raise InvalidStateError, "unsupported Date start #{value_class}"
-      end
-
-      def canonical_big_decimal(value)
-        sign, digits, base, exponent = BigDecimal.instance_method(:split).bind_call(value)
-        [:big_decimal, sign, String.instance_method(:b).bind_call(digits), base, exponent]
       end
 
       def canonical_time(value)
