@@ -50,7 +50,18 @@ module Engram
       end
 
       def existing_ids(scope:, ids:)
-        model.where(scope: scope, id: ids).pluck(:id)
+        persisted_ids = model.where(scope: scope, id: ids).pluck(:id)
+        id_type = model.type_for_attribute("id")
+        persisted_lookup = persisted_ids.each_with_object({}) { |id, lookup| lookup[id] = true }
+        matched_ids = {}
+
+        ids.select do |id|
+          cast_id = id_type.cast(id)
+          next false unless persisted_lookup[cast_id]
+          next false if matched_ids[cast_id]
+
+          matched_ids[cast_id] = true
+        end
       end
 
       def update(scope:, id:, record:)

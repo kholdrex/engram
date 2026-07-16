@@ -26,7 +26,10 @@ module Engram
       end
 
       # Optional performance capability: return the subset of requested ids that
-      # exists in `scope`, without loading complete records. Callers must fall back
+      # exists in `scope`, preserving each requested value's representation rather
+      # than returning a store-native cast of it. Return at most one requested
+      # representation for each persisted record when the store accepts aliases.
+      # Callers must fall back
       # to #all for legacy stores that do not expose this method or leave it
       # unimplemented, so adding it does not break custom MemoryStore adapters.
       def existing_ids(scope:, ids:)
