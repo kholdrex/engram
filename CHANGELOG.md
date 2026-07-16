@@ -5,6 +5,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-17
+
 ### Added
 - Embedding provenance metadata is stored with new memories so applications can detect model
   and dimension drift during store search result validation.
