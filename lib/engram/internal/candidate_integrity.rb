@@ -15,6 +15,7 @@ module Engram
 
       COLLECTION_MUTATION_MESSAGE = "consolidators must not mutate the candidates collection"
       CANDIDATE_MUTATION_MESSAGE = "consolidators must not mutate candidates"
+      MAX_NESTING_DEPTH = 100
 
       RECORD_STATE_READERS = Engram::Record::STATE_READERS.to_h do |attribute|
         [attribute, Engram::Record.instance_method(attribute)]
@@ -88,7 +89,8 @@ module Engram
 
       private
 
-      def duplicate_value(value, active = {}.compare_by_identity)
+      def duplicate_value(value, active = {}.compare_by_identity, depth = 0)
+        validate_nesting_depth!(value, depth)
         value_class = plain_class(value)
         return value unless supported_value_class?(value_class)
 
@@ -101,19 +103,21 @@ module Engram
         elsif value_class.equal?(Array)
           with_acyclic_value(value, active) do
             copy = []
-            Array.instance_method(:each).bind_call(value) { |element| copy << duplicate_value(element, active) }
+            Array.instance_method(:each).bind_call(value) do |element|
+              copy << duplicate_value(element, active, depth + 1)
+            end
             copy
           end
         elsif value_class.equal?(Hash)
-          duplicate_hash(value, active)
+          duplicate_hash(value, active, depth)
         else
           # The remaining supported scalar values are immutable.
-          canonical_value(value, active)
+          canonical_value(value, active, depth)
           value
         end
       end
 
-      def duplicate_hash(value, active)
+      def duplicate_hash(value, active, depth)
         default_proc = Hash.instance_method(:default_proc).bind_call(value)
         raise InvalidStateError, "unsupported candidate value Hash with a default proc" if default_proc
 
@@ -122,9 +126,9 @@ module Engram
           # without hashing, comparing, serializing, or otherwise dispatching through
           # application key behavior. Values still pass through our structural copier.
           copy = Hash.instance_method(:transform_values).bind_call(value) do |nested_value|
-            duplicate_value(nested_value, active)
+            duplicate_value(nested_value, active, depth + 1)
           end
-          copy.default = duplicate_value(Hash.instance_method(:default).bind_call(value), active)
+          copy.default = duplicate_value(Hash.instance_method(:default).bind_call(value), active, depth + 1)
           copy
         end
       end
@@ -239,7 +243,8 @@ module Engram
 
       # Metadata containers are structural even when subclassed: bound core traversal
       # ignores their behavior. Only non-container application leaves remain opaque.
-      def canonical_metadata_value(value, active = {}.compare_by_identity)
+      def canonical_metadata_value(value, active = {}.compare_by_identity, depth = 0)
+        validate_nesting_depth!(value, depth)
         if core_container?(value, Hash)
           default_proc = Hash.instance_method(:default_proc).bind_call(value)
           raise InvalidStateError, "unsupported candidate value Hash with a default proc" if default_proc
@@ -247,9 +252,12 @@ module Engram
           with_acyclic_value(value, active) do
             entries = []
             Hash.instance_method(:each_pair).bind_call(value) do |key, nested_value|
-              entries << [canonical_metadata_value(key, active), canonical_metadata_value(nested_value, active)]
+              entries << [
+                canonical_metadata_value(key, active, depth + 1),
+                canonical_metadata_value(nested_value, active, depth + 1)
+              ]
             end
-            default = canonical_metadata_value(Hash.instance_method(:default).bind_call(value), active)
+            default = canonical_metadata_value(Hash.instance_method(:default).bind_call(value), active, depth + 1)
             [:metadata_hash, identity(value), frozen?(value),
               Hash.instance_method(:compare_by_identity?).bind_call(value), default, entries]
           end
@@ -257,7 +265,7 @@ module Engram
           with_acyclic_value(value, active) do
             elements = []
             Array.instance_method(:each).bind_call(value) do |element|
-              elements << canonical_metadata_value(element, active)
+              elements << canonical_metadata_value(element, active, depth + 1)
             end
             [:metadata_array, identity(value), frozen?(value), elements]
           end
@@ -267,28 +275,31 @@ module Engram
               !Object.instance_method(:instance_variables).bind_call(value).empty?
             [:opaque, identity(value)]
           else
-            canonical_value(value, active)
+            canonical_value(value, active, depth)
           end
         end
       end
 
-      def duplicate_metadata_value(value, active = {}.compare_by_identity)
+      def duplicate_metadata_value(value, active = {}.compare_by_identity, depth = 0)
+        validate_nesting_depth!(value, depth)
         if core_container?(value, Hash)
           default_proc = Hash.instance_method(:default_proc).bind_call(value)
           raise InvalidStateError, "unsupported candidate value Hash with a default proc" if default_proc
 
           with_acyclic_value(value, active) do
             copy = Hash.instance_method(:transform_values).bind_call(value) do |nested_value|
-              duplicate_metadata_value(nested_value, active)
+              duplicate_metadata_value(nested_value, active, depth + 1)
             end
-            copy.default = duplicate_metadata_value(Hash.instance_method(:default).bind_call(value), active)
+            copy.default = duplicate_metadata_value(
+              Hash.instance_method(:default).bind_call(value), active, depth + 1
+            )
             copy
           end
         elsif core_container?(value, Array)
           with_acyclic_value(value, active) do
             copy = []
             Array.instance_method(:each).bind_call(value) do |element|
-              copy << duplicate_metadata_value(element, active)
+              copy << duplicate_metadata_value(element, active, depth + 1)
             end
             copy
           end
@@ -298,7 +309,7 @@ module Engram
               !Object.instance_method(:instance_variables).bind_call(value).empty?
             value
           else
-            duplicate_value(value, active)
+            duplicate_value(value, active, depth)
           end
         end
       end
@@ -309,7 +320,8 @@ module Engram
         false
       end
 
-      def canonical_value(value, active = {}.compare_by_identity)
+      def canonical_value(value, active = {}.compare_by_identity, depth = 0)
+        validate_nesting_depth!(value, depth)
         value_class = plain_class(value)
         return [:opaque, identity(value)] unless supported_value_class?(value_class)
 
@@ -339,9 +351,9 @@ module Engram
         elsif value_class.equal?(Time)
           canonical_time(value)
         elsif value_class.equal?(Array)
-          canonical_array(value, active)
+          canonical_array(value, active, depth)
         elsif value_class.equal?(Hash)
-          canonical_hash(value, active)
+          canonical_hash(value, active, depth)
         else
           raise InvalidStateError, "unsupported candidate value"
         end
@@ -440,29 +452,32 @@ module Engram
         end
       end
 
-      def canonical_array(value, active)
+      def canonical_array(value, active, depth)
         with_acyclic_value(value, active) do
           elements = []
           Array.instance_method(:each).bind_call(value) do |element|
-            elements << canonical_value(element, active)
+            elements << canonical_value(element, active, depth + 1)
           end
           [:array, identity(value), frozen?(value), elements]
         end
       end
 
-      def canonical_hash(value, active)
+      def canonical_hash(value, active, depth)
         default_proc = Hash.instance_method(:default_proc).bind_call(value)
         raise InvalidStateError, "unsupported candidate value Hash with a default proc" if default_proc
 
         with_acyclic_value(value, active) do
           entries = []
           Hash.instance_method(:each_pair).bind_call(value) do |key, nested_value|
-            entries << [canonical_value(key, active), canonical_value(nested_value, active)]
+            entries << [
+              canonical_value(key, active, depth + 1),
+              canonical_value(nested_value, active, depth + 1)
+            ]
           end
           default = Hash.instance_method(:default).bind_call(value)
           compare_by_identity = Hash.instance_method(:compare_by_identity?).bind_call(value)
           [:hash, identity(value), frozen?(value), compare_by_identity,
-            canonical_value(default, active), entries]
+            canonical_value(default, active, depth + 1), entries]
         end
       end
 
@@ -472,6 +487,14 @@ module Engram
 
       def identity(value)
         IdentityToken.new(value)
+      end
+
+      def validate_nesting_depth!(value, depth)
+        return if depth <= MAX_NESTING_DEPTH
+        return unless core_container?(value, Array) || core_container?(value, Hash)
+
+        raise InvalidStateError,
+          "unsupported candidate value: nesting exceeds maximum depth of #{MAX_NESTING_DEPTH}"
       end
 
       def with_acyclic_value(value, active)

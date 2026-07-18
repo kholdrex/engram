@@ -29,6 +29,10 @@ RSpec.describe Engram::Internal::CandidateIntegrity do
       .to raise_error(described_class::MutationError, described_class::CANDIDATE_MUTATION_MESSAGE)
   end
 
+  def nested_arrays(depth, leaf = "value")
+    depth.times.reduce(leaf) { |nested, _index| [nested] }
+  end
+
   it "derives its Record schema from Record's canonical state readers" do
     readers = described_class::RECORD_STATE_READERS
 
@@ -45,6 +49,52 @@ RSpec.describe Engram::Internal::CandidateIntegrity do
     snapshot = integrity.snapshot(candidates)
 
     expect(integrity.verify!(candidates, snapshot)).to be_nil
+  end
+
+  it "accepts candidate metadata at the maximum nesting depth" do
+    candidate = record(metadata: {"value" => nested_arrays(described_class::MAX_NESTING_DEPTH)})
+    candidates = [candidate]
+    snapshot = integrity.snapshot(candidates)
+
+    expect(integrity.verify!(candidates, snapshot)).to be_nil
+    expect(integrity.validate!(candidate)).to be_nil
+    expect(integrity.detach(candidate).metadata).to eq(candidate.metadata)
+  end
+
+  it "deterministically rejects candidate metadata beyond the maximum nesting depth" do
+    just_over_limit = record(metadata: {
+      "value" => nested_arrays(described_class::MAX_NESTING_DEPTH + 1)
+    })
+    candidate = record(metadata: {"value" => nested_arrays(20_000)})
+
+    expect { integrity.validate!(just_over_limit) }
+      .to raise_error(described_class::InvalidStateError, /nesting exceeds maximum depth/)
+    expect { integrity.snapshot([candidate]) }
+      .to raise_error(described_class::InvalidStateError, /nesting exceeds maximum depth/)
+    expect { integrity.validate!(candidate) }
+      .to raise_error(described_class::InvalidStateError, /nesting exceeds maximum depth/)
+    expect { integrity.detach(candidate) }
+      .to raise_error(described_class::InvalidStateError, /nesting exceeds maximum depth/)
+  end
+
+  it "reports excessive nesting introduced after a snapshot as candidate mutation" do
+    candidate = record
+    candidates = [candidate]
+    snapshot = integrity.snapshot(candidates)
+    candidate.metadata["value"] = nested_arrays(20_000)
+
+    expect { integrity.verify!(candidates, snapshot) }
+      .to raise_error(described_class::MutationError, described_class::CANDIDATE_MUTATION_MESSAGE)
+  end
+
+  it "rejects excessive nesting in otherwise supported non-metadata values" do
+    candidate = record
+    candidate.instance_variable_set(:@embedding, nested_arrays(20_000, 1.0))
+
+    expect { integrity.validate!(candidate) }
+      .to raise_error(described_class::InvalidStateError, /nesting exceeds maximum depth/)
+    expect { integrity.detach(candidate) }
+      .to raise_error(described_class::InvalidStateError, /nesting exceeds maximum depth/)
   end
 
   it "accepts and detaches opaque application metadata values" do
@@ -263,6 +313,9 @@ RSpec.describe Engram::Internal::CandidateIntegrity do
       expect { integrity.snapshot([record(metadata: {"value" => value})]) }
         .to raise_error(described_class::InvalidStateError)
     end
+
+    expect { integrity.detach(record(metadata: {"value" => cyclic})) }
+      .to raise_error(described_class::InvalidStateError, /cyclic candidate value/)
   end
 
   it "detects candidate collection replacement, append, remove, and reorder" do
