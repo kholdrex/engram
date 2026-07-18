@@ -26,7 +26,7 @@ module Engram
     def add_prepared(record, scope: record&.scope)
       return unless record
 
-      validate_provenance!(record)
+      record = canonicalize_provenance!(record)
       unless Engram::Internal::Scope.record_matches?(record, scope)
         raise Engram::Error, "cannot move memory across scopes"
       end
@@ -37,7 +37,7 @@ module Engram
     def update_prepared(scope:, id:, record:)
       return unless record
 
-      validate_provenance!(record)
+      record = canonicalize_provenance!(record)
       unless Engram::Internal::Scope.record_matches?(record, scope)
         raise Engram::Error, "cannot move memory across scopes"
       end
@@ -82,6 +82,16 @@ module Engram
     end
 
     private
+
+    def canonicalize_provenance!(record)
+      metadata = RECORD_METADATA_READER.bind_call(record)
+      canonical_metadata = Engram::Provenance.canonical_metadata_for_persistence(metadata)
+      return record if canonical_metadata.equal?(metadata)
+
+      record.with(metadata: canonical_metadata)
+    rescue TypeError
+      raise Engram::Error, "persistence requires an Engram::Record"
+    end
 
     def validate_provenance!(record)
       metadata = RECORD_METADATA_READER.bind_call(record)

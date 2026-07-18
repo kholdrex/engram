@@ -281,10 +281,25 @@ RSpec.describe Engram::Provenance do
       .to raise_error(Engram::Error, /unsupported provenance version 2/)
   end
 
-  it "distinguishes absent provenance from valid provenance during persistence parsing" do
+  it "distinguishes absent provenance from valid provenance and rejects a scalar reserved namespace" do
     expect(described_class.extract_for_persistence({"host" => true})).to be_nil
-    expect(described_class.extract_for_persistence({"_engram" => "legacy user data"})).to be_nil
+    expect { described_class.extract_for_persistence({"_engram" => "legacy user data"}) }
+      .to raise_error(Engram::Error, /metadata key "_engram" is reserved/)
     expect(described_class.extract_for_persistence(described_class.attach({}, provenance))).to eq(provenance)
+  end
+
+  it "canonicalizes provenance without rehashing arbitrary application metadata keys" do
+    application_key = Object.new
+    metadata = {application_key => "opaque", "_engram" => {"provenance" => provenance.to_h}}
+    application_key.define_singleton_method(:hash) { raise "application key hashing must not run" }
+
+    canonical = described_class.canonical_metadata_for_persistence(metadata)
+    application_entry = Hash.instance_method(:each_pair).bind_call(canonical).find do |key, _value|
+      Object.instance_method(:equal?).bind_call(key, application_key)
+    end
+
+    expect(application_entry).to eq([application_key, "opaque"])
+    expect(canonical.dig("_engram", "provenance")).to eq(provenance.to_h)
   end
 
   it "does not let scalar reserved metadata mask strict provenance validation in either key style" do

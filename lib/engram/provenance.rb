@@ -193,10 +193,14 @@ module Engram
         metadata ||= {}
         return nil unless core_kind_of?(metadata, Hash)
 
-        provenance_values = core_hash_values(metadata, RESERVED_KEY, :_engram)
-          .select { |value| core_kind_of?(value, Hash) }
+        reserved_values = core_hash_values(metadata, RESERVED_KEY, :_engram)
+        reserved_hashes = reserved_values.select { |value| core_kind_of?(value, Hash) }
+        provenance_values = reserved_hashes
           .flat_map { |reserved| core_hash_values(reserved, METADATA_KEY, :provenance) }
-        return nil if provenance_values.empty?
+        if provenance_values.empty?
+          reject_non_hash_reserved_values!(reserved_values)
+          return nil
+        end
 
         reserved = provenance_values.reduce({}) do |merged, value|
           detached = detach_provenance_container(value)
@@ -215,7 +219,40 @@ module Engram
 
         # Validate the known schema while retaining the already detached extension data.
         from_h(data)
+        reject_non_hash_reserved_values!(reserved_values)
         data
+      end
+
+      # Replaces validated provenance aliases with the detached payload in a plain
+      # reserved namespace. Unrelated application metadata values remain untouched.
+      def canonical_metadata_for_persistence(metadata)
+        payload = canonical_payload_for_persistence(metadata)
+        return metadata unless payload
+
+        # Copy the core table without rehashing arbitrary application keys, then
+        # remove only the reserved aliases through bound Hash traversal.
+        application_metadata = Hash.instance_method(:transform_values).bind_call(metadata) { |value| value }
+        Hash.instance_method(:delete_if).bind_call(application_metadata) do |key, _value|
+          reserved_key_style(key)
+        end
+        string_reserved = []
+        symbol_reserved = []
+        Hash.instance_method(:each_pair).bind_call(metadata) do |key, value|
+          case reserved_key_style(key)
+          when :string then string_reserved << value
+          when :symbol then symbol_reserved << value
+          end
+        end
+
+        reserved = (string_reserved + symbol_reserved).reduce({}) do |merged, value|
+          siblings = {}
+          Hash.instance_method(:each_pair).bind_call(value) do |key, nested|
+            siblings[key] = nested unless provenance_key_alias?(key)
+          end
+          Engram::ReservedMetadata.merge(merged, Engram::ReservedMetadata.normalize(siblings))
+        end
+        application_metadata[RESERVED_KEY] = reserved.merge(METADATA_KEY => payload)
+        application_metadata
       end
 
       # Represents the complete canonical payload without relying on value #==, #eql?,
@@ -228,6 +265,24 @@ module Engram
       end
 
       private
+
+      def reject_non_hash_reserved_values!(reserved_values)
+        return if reserved_values.all? { |value| core_kind_of?(value, Hash) }
+
+        raise Engram::Error, "metadata key #{RESERVED_KEY.inspect} is reserved for Engram embedding metadata"
+      end
+
+      def reserved_key_style(key)
+        key_class = Object.instance_method(:class).bind_call(key)
+        return :symbol if key.equal?(:_engram) && key_class.equal?(Symbol)
+        :string if core_kind_of?(key, String) && String.instance_method(:==).bind_call(key, RESERVED_KEY)
+      rescue TypeError
+        nil
+      end
+
+      def provenance_key_alias?(key)
+        core_key_equal?(key, METADATA_KEY, :provenance)
+      end
 
       # Finds trusted namespace keys through Hash's implementation rather than any
       # behavior supplied by a Hash subclass or singleton class.

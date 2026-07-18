@@ -71,6 +71,22 @@ RSpec.describe Engram::Persistence do
     value
   end
 
+  def json_serializing_store
+    Class.new do
+      attr_reader :serialized_metadata
+
+      def add(record)
+        @serialized_metadata = JSON.parse(JSON.generate(record.metadata))
+        record
+      end
+
+      def update(scope:, id:, record:)
+        @serialized_metadata = JSON.parse(JSON.generate(record.metadata))
+        record
+      end
+    end.new
+  end
+
   describe "#add" do
     context "without a persistence policy" do
       let(:policy) { nil }
@@ -410,6 +426,48 @@ RSpec.describe Engram::Persistence do
 
       expect(persisted.content).to eq("User likes [REDACTED]")
       expect(Engram::Provenance.extract(persisted.metadata)).to eq(provenance)
+    end
+  end
+
+  describe "prepared store boundary" do
+    let(:policy) { nil }
+    let(:store) { json_serializing_store }
+
+    it "rejects a non-Hash reserved namespace before it can serialize forged provenance" do
+      forged_reserved = Object.new
+      forged_json = JSON.generate("provenance" => provenance.to_h.merge("version" => 99))
+      forged_reserved.define_singleton_method(:to_json) { |*_args| forged_json }
+      candidate = record.with(metadata: {"tenant" => "kept", "_engram" => forged_reserved})
+
+      expect { persistence.add_prepared(candidate) }
+        .to raise_error(Engram::Error, /metadata key "_engram" is reserved/)
+      expect(store.serialized_metadata).to be_nil
+    end
+
+    it "hands updates the canonical plain provenance that was validated" do
+      lying_string_class = Class.new(String) do
+        def to_json(*_args) = JSON.generate("forged-extractor")
+      end
+      payload = provenance.to_h
+      payload.fetch("extractor")["name"] = lying_string_class.new("host")
+      metadata = {
+        "tenant" => {"id" => 7},
+        "_engram" => {
+          "embedding" => {"dimensions" => 3, "model" => "embedder-v1"},
+          "provenance" => payload
+        }
+      }
+      candidate = record.with(metadata: metadata)
+
+      persistence.update_prepared(scope: candidate.scope, id: 12, record: candidate)
+
+      expect(store.serialized_metadata).to eq(
+        "tenant" => {"id" => 7},
+        "_engram" => {
+          "embedding" => {"dimensions" => 3, "model" => "embedder-v1"},
+          "provenance" => provenance.to_h
+        }
+      )
     end
   end
 
