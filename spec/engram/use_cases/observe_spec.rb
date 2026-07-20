@@ -312,6 +312,24 @@ RSpec.describe Engram::UseCases::Observe do
     expect(observe.call(messages: ["turn"], scope: "u:1", idempotency_key: "turn-1")).to eq([])
   end
 
+  it "releases its claim when preflight validation fails" do
+    candidate = Engram::Record.new(content: "Candidate", scope: "u:1", embedding: [0.0])
+    decisions = [
+      [Engram::Decision.new(action: :update, candidate: candidate, target_id: 999_999)],
+      [Engram::Decision.new(action: :add, candidate: candidate)]
+    ]
+    consolidator = Object.new
+    consolidator.define_singleton_method(:reconcile_all) { |candidates:, scope:| decisions.shift }
+    processed = Engram::Adapters::InMemoryProcessedTurns.new
+    observe = described_class.new(store: store, extractor: double(extract: [candidate]),
+      consolidator: consolidator, processed_turns: processed, embedder: embedder)
+
+    expect { observe.call(messages: ["turn"], scope: "u:1", idempotency_key: "turn-1") }
+      .to raise_error(Engram::Error, /no memory with id 999999/)
+    expect(observe.call(messages: ["turn"], scope: "u:1", idempotency_key: "turn-1").map(&:action)).to eq([:add])
+    expect(store.all(scope: "u:1").map(&:content)).to eq(["Candidate"])
+  end
+
   it "accepts noop decisions with malformed or future provenance and completes their claims" do
     metadata_values = [
       {"_engram" => {"provenance" => {"version" => 1, "sources" => []}}},
