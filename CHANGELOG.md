@@ -5,19 +5,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-## [0.5.0] - 2026-07-17
-
 ### Added
 - Optional `Engram::Extraction` results let custom extractors attach versioned source
   provenance while remaining compatible with plain `Engram::Record` results.
-- Embedding provenance metadata is stored with new memories so applications can detect model
-  and dimension drift during store search result validation.
-- `Memory#rebuild_embeddings` and `Engram::UseCases::RebuildEmbeddings` for scoped,
-  deterministic rebuilding of stale vectors plus provenance metadata.
-- Added a focused rake task `engram:rebuild_embeddings` with batch control and optional
-  forced full-scope rebuild mode for recovery after provider/model changes. The task is
-  packaged with the gem and loaded into host Rails apps by the Railtie, where it depends on
-  `:environment` so app initializers run first. `STALE_ONLY` accepts `false`, `0`, or `no`.
 
 ### Changed
 - Persistence accepts records without provenance, rejects structurally ungrounded provenance
@@ -40,6 +30,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   Substituted, modified, missing, malformed, or cross-scope candidates fail closed.
   `Observe` preflights the complete decision batch, including persistence policy and hook
   transformations, before beginning store mutations.
+
+### Fixed
+- Observation rejects extractor candidates with caller-supplied IDs, and `InMemoryStore#add`
+  always allocates a fresh ID like the pgvector adapter, preventing same- or cross-scope record
+  replacement through add semantics.
+- `forget` now separates destructive provenance authorization from write-content filtering and
+  redaction, so secret or transient memories can be deleted. Custom policies may implement
+  `allow_destructive?` with a strict boolean return; write-only policies no longer authorize
+  deletion through their `call` result.
+
+## [0.5.0] - 2026-07-17
+
+### Added
+- Embedding provenance metadata is stored with new memories so applications can detect model
+  and dimension drift during store search result validation.
+- `Memory#rebuild_embeddings` and `Engram::UseCases::RebuildEmbeddings` for scoped,
+  deterministic rebuilding of stale vectors plus provenance metadata.
+- Added a focused rake task `engram:rebuild_embeddings` with batch control and optional
+  forced full-scope rebuild mode for recovery after provider/model changes. The task is
+  packaged with the gem and loaded into host Rails apps by the Railtie, where it depends on
+  `:environment` so app initializers run first. `STALE_ONLY` accepts `false`, `0`, or `no`.
+
+### Changed
 - `MemoryStore` mutations now require an explicit `scope:` and enforce the `(scope, id)` boundary
   for update, delete, and touch operations. Custom stores must adopt the new scoped signatures;
   `update` returns the updated record or raises `Engram::Error`, while delete and touch return an
@@ -72,13 +85,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   set `dimensions:` to that model's actual output size.
 
 ### Fixed
-- Observation rejects extractor candidates with caller-supplied IDs, and `InMemoryStore#add`
-  always allocates a fresh ID like the pgvector adapter, preventing same- or cross-scope record
-  replacement through add semantics.
-- `forget` now separates destructive provenance authorization from write-content filtering and
-  redaction, so secret or transient memories can be deleted. Custom policies may implement
-  `allow_destructive?` with a strict boolean return; write-only policies no longer authorize
-  deletion through their `call` result.
 - `Observe` now raises `Engram::ObservationInProgressError` when a turn is claimed but not
   completed, rather than reporting a successful no-op. `ObserveJob` retries this error with
   backoff that outlasts the default claim lease; direct callers should handle it as retryable.

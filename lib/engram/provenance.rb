@@ -523,17 +523,6 @@ module Engram
       def symbolize_extractor(data)
         {name: data["name"], provider: data["provider"], model: data["model"]}
       end
-
-      def deep_stringify(value)
-        case value
-        when Hash
-          value.each_with_object({}) { |(key, nested), out| out[key.to_s] = deep_stringify(nested) }
-        when Array
-          value.map { |nested| deep_stringify(nested) }
-        else
-          value
-        end
-      end
     end
   end
 end
