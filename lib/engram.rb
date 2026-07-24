@@ -31,6 +31,7 @@ require_relative "engram/use_cases/inject"
 require_relative "engram/use_cases/observe"
 require_relative "engram/use_cases/forget"
 require_relative "engram/use_cases/rebuild_embeddings"
+require_relative "engram/use_cases/source_impact"
 
 # Built-in adapters (pure Ruby, no external deps)
 require_relative "engram/adapters/in_memory_store"

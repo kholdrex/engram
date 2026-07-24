@@ -104,6 +104,15 @@ module Engram
         .call(scope: scope, older_than: older_than, min_importance: min_importance)
     end
 
+    # Return the memories in this scope whose provenance references the exact host
+    # source. `source_id` and `source_type` must each be non-blank Strings and are
+    # matched exactly, without normalization. Source IDs are references, not an
+    # authorization boundary; the lookup stays bound to this scope.
+    def memories_from_source(source_id:, source_type:)
+      UseCases::SourceImpact.new(store: @store)
+        .call(scope: scope, source_id: source_id, source_type: source_type)
+    end
+
     private
 
     def persist(record)
