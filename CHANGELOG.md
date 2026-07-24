@@ -5,6 +5,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-07-24
+
 ### Added
 - Optional `Engram::Extraction` results let custom extractors attach versioned source
   provenance while remaining compatible with plain `Engram::Record` results.
