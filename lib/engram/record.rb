@@ -33,6 +33,13 @@ module Engram
       self.class.new(**to_h.merge(attributes))
     end
 
+    # Return structured supporting-source metadata when this record carries a
+    # provenance schema understood by the installed Engram version.
+    # Legacy, malformed, and future-schema records remain readable and return nil.
+    def provenance
+      Engram::Provenance.extract(metadata)
+    end
+
     def to_h
       STATE_READERS.to_h { |reader| [reader, public_send(reader)] }
     end
