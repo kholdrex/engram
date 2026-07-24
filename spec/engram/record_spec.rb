@@ -45,6 +45,45 @@ RSpec.describe Engram::Record do
     expect(updated.last_accessed_at).to eq(last_accessed_at)
   end
 
+  it "exposes structured provenance attached to a recalled record" do
+    provenance = Engram::Provenance.new(
+      sources: [
+        Engram::Provenance::Source.new(
+          source_id: "conversation:42",
+          source_type: "conversation",
+          message_index: 3,
+          role: "user",
+          spans: [Engram::Provenance::Span.new(start_offset: 6, end_offset: 15)],
+          alignment: :exact
+        )
+      ],
+      extractor: Engram::Provenance::Extractor.new(name: "host", model: "model-1"),
+      confidence: 0.9
+    )
+    metadata = Engram::Provenance.attach({}, provenance)
+
+    record = described_class.new(content: "User likes tea", scope: "user:1", metadata: metadata)
+
+    expect(record.provenance).to eq(provenance)
+    expect(record.provenance.sources.first.source_id).to eq("conversation:42")
+  end
+
+  it "returns nil provenance for legacy, malformed, and future records" do
+    legacy = described_class.new(content: "Legacy", scope: "user:1")
+    malformed = described_class.new(
+      content: "Malformed",
+      scope: "user:1",
+      metadata: {"_engram" => {"provenance" => {"version" => 1, "sources" => []}}}
+    )
+    future = described_class.new(
+      content: "Future",
+      scope: "user:1",
+      metadata: {"_engram" => {"provenance" => {"version" => 99}}}
+    )
+
+    expect([legacy.provenance, malformed.provenance, future.provenance]).to eq([nil, nil, nil])
+  end
+
   it "rejects unknown memory kinds" do
     expect do
       described_class.new(content: "User likes tea", scope: "user:1", kind: :relationship)

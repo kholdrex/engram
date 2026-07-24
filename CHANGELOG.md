@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 - Optional `Engram::Extraction` results let custom extractors attach versioned source
   provenance while remaining compatible with plain `Engram::Record` results.
+- `Engram::Record#provenance` exposes understood supporting source IDs, alignments, and spans
+  on recalled records while preserving tolerant reads for legacy and future schemas.
 
 ### Changed
 - Persistence accepts records without provenance, rejects structurally ungrounded provenance

@@ -363,6 +363,21 @@ values. They may instead return `Engram::Extraction` values to attach optional s
 `Engram::Provenance` to a candidate; arrays may contain either type. Records with no
 provenance remain accepted.
 
+Recalled records expose understood provenance directly, without loading source content:
+
+```ruby
+record = memory.recall("where did this preference come from?").first
+
+record.provenance&.sources&.each do |source|
+  puts [source.source_id, source.alignment, source.spans.map(&:to_h)].inspect
+end
+```
+
+`Record#provenance` returns `nil` for legacy records and for malformed or future schemas so
+reads remain compatible. Treat the returned source IDs and spans as untrusted references.
+They do not prove source access or authorize retrieving source content; applications must
+enforce the record's scope and their own source authorization before resolving them.
+
 By default, the persistence policy rejects provenance containing a source marked
 `ungrounded`. Applications that intentionally accept it can opt out:
 
