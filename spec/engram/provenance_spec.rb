@@ -157,6 +157,126 @@ RSpec.describe Engram::Provenance do
     end.to raise_error(ArgumentError, /end_offset > start_offset/)
   end
 
+  describe "source text validation" do
+    def source_text(text: "I use café daily", source_id: "conversation:42", message_index: 3)
+      described_class::SourceText.new(
+        source_id: source_id,
+        source_type: "conversation",
+        message_index: message_index,
+        role: "user",
+        text: text
+      )
+    end
+
+    it "validates source identity and resolves Unicode codepoint spans" do
+      source = described_class::Source.new(
+        source_id: "conversation:42",
+        source_type: "conversation",
+        message_index: 3,
+        role: "user",
+        spans: [described_class::Span.new(start_offset: 6, end_offset: 10)],
+        alignment: :exact
+      )
+
+      expect(source.validate_source_text!(source_text)).to be(true)
+      expect(source.supporting_text(source_text)).to eq(["café"])
+    end
+
+    it "rejects source text from a different source or message" do
+      source = provenance.sources.first
+
+      expect do
+        source.validate_source_text!(source_text(text: "long enough", source_id: "conversation:other"))
+      end.to raise_error(Engram::Error, /source_id does not match/)
+
+      expect do
+        source.validate_source_text!(source_text(text: "long enough", message_index: 4))
+      end.to raise_error(Engram::Error, /message_index does not match/)
+    end
+
+    it "rejects source type and role mismatches" do
+      source = provenance.sources.first
+
+      expect do
+        source.validate_source_text!(
+          described_class::SourceText.new(
+            source_id: "conversation:42", source_type: "document", message_index: 3,
+            role: "user", text: "long enough"
+          )
+        )
+      end.to raise_error(Engram::Error, /source_type does not match/)
+
+      expect do
+        source.validate_source_text!(
+          described_class::SourceText.new(
+            source_id: "conversation:42", source_type: "conversation", message_index: 3,
+            role: "assistant", text: "long enough"
+          )
+        )
+      end.to raise_error(Engram::Error, /role does not match/)
+    end
+
+    it "preserves stored order when resolving multiple spans" do
+      source = described_class::Source.new(
+        source_id: "conversation:42", source_type: "conversation", message_index: 3, role: "user",
+        spans: [
+          described_class::Span.new(start_offset: 11, end_offset: 17),
+          described_class::Span.new(start_offset: 0, end_offset: 5)
+        ],
+        alignment: :normalized
+      )
+
+      expect(source.supporting_text(source_text(text: "first then second"))).to eq(["second", "first"])
+    end
+
+    it "requires the immutable source text contract" do
+      expect do
+        provenance.sources.first.validate_source_text!("plain text")
+      end.to raise_error(ArgumentError, /Provenance::SourceText/)
+    end
+
+    it "rejects spans beyond the referenced source message" do
+      source = described_class::Source.new(
+        source_id: "conversation:42",
+        source_type: "conversation",
+        message_index: 3,
+        role: "user",
+        spans: [described_class::Span.new(start_offset: 0, end_offset: 5)],
+        alignment: :normalized
+      )
+
+      expect do
+        source.validate_source_text!(source_text(text: "four"))
+      end.to raise_error(Engram::Error, /span 0 ends at 5 beyond source length 4/)
+    end
+
+    it "owns immutable UTF-8 source text without freezing caller strings" do
+      caller_text = +"plain ASCII"
+      value = described_class::SourceText.new(
+        source_id: "conversation:42", source_type: "conversation", message_index: 3,
+        role: "user", text: caller_text
+      )
+
+      expect(value.text.encoding).to eq(Encoding::UTF_8)
+      expect(value).to be_frozen
+      expect(value.text).to be_frozen
+      expect(caller_text).not_to be_frozen
+    end
+
+    it "rejects invalid source text before span validation" do
+      invalid = +"bad"
+      invalid.force_encoding(Encoding::UTF_8)
+      invalid.setbyte(0, 0xFF)
+
+      expect do
+        described_class::SourceText.new(
+          source_id: "conversation:42", source_type: "conversation", message_index: 3,
+          role: "user", text: invalid
+        )
+      end.to raise_error(ArgumentError, /valid UTF-8/)
+    end
+  end
+
   it "round-trips through the versioned reserved metadata schema" do
     metadata = described_class.attach({"tenant_field" => "kept"}, provenance)
 

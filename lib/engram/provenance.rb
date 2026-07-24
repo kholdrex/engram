@@ -48,6 +48,30 @@ module Engram
       end
     end
 
+    class SourceText
+      attr_reader :source_id, :source_type, :message_index, :role, :text
+
+      def initialize(source_id:, source_type:, message_index:, role:, text:)
+        raise ArgumentError, "source_id is required" if source_id.to_s.strip.empty?
+        raise ArgumentError, "source_type is required" if source_type.to_s.strip.empty?
+        unless message_index.is_a?(Integer) && !message_index.negative?
+          raise ArgumentError, "message_index must be a non-negative integer"
+        end
+        raise ArgumentError, "role is required" if role.to_s.strip.empty?
+        raise ArgumentError, "source text must be a String" unless text.is_a?(String)
+        raise ArgumentError, "source text must be valid UTF-8" unless text.valid_encoding?
+
+        @source_id = source_id.to_s.dup.freeze
+        @source_type = source_type.to_s.dup.freeze
+        @message_index = message_index
+        @role = role.to_s.dup.freeze
+        @text = text.encode(Encoding::UTF_8).freeze
+        freeze
+      rescue EncodingError
+        raise ArgumentError, "source text must be valid UTF-8"
+      end
+    end
+
     class Source
       attr_reader :source_id, :source_type, :message_index, :role, :spans, :alignment
 
@@ -77,6 +101,42 @@ module Engram
         end.freeze
         @alignment = normalized_alignment
         freeze
+      end
+
+      def validate_source_text!(source_text)
+        unless source_text.is_a?(SourceText)
+          raise ArgumentError, "source_text must be a Provenance::SourceText"
+        end
+
+        {
+          source_id: source_id,
+          source_type: source_type,
+          message_index: message_index,
+          role: role
+        }.each do |attribute, expected|
+          actual = source_text.public_send(attribute)
+          next if actual == expected
+
+          raise Engram::Error, "provenance #{attribute} does not match source text"
+        end
+
+        source_length = source_text.text.length
+        spans.each_with_index do |span, index|
+          next if span.end_offset <= source_length
+
+          raise Engram::Error,
+            "provenance span #{index} ends at #{span.end_offset} beyond source length #{source_length}"
+        end
+
+        true
+      end
+
+      def supporting_text(source_text)
+        validate_source_text!(source_text)
+
+        spans.map do |span|
+          source_text.text[span.start_offset...span.end_offset].freeze
+        end.freeze
       end
 
       def ==(other)
