@@ -74,7 +74,7 @@ explicitly version-gated:
 - Core types and facade: `Engram::Memory`, `Engram::Record`, `Engram::Decision`, `Engram::PersistencePolicy`, and `Engram.with_memory`.
 - Store and adapter ports: `Engram::Ports::MemoryStore`, `Engram::Ports::Embedder`, `Engram::Ports::Completion`.
 - Rails integration points: `has_memory`, `Memory#observe_later`, and generator outputs under `engram:` rake tasks.
-- Lifecycle methods in `Engram::Memory`: `add`, `recall`, `inject_into`, `observe`, `observe_later`, `forget_stale`, and `rebuild_embeddings`.
+- Lifecycle methods in `Engram::Memory`: `add`, `recall`, `inject_into`, `observe`, `observe_later`, `forget_stale`, `rebuild_embeddings`, and `memories_from_source`.
 - RubyLLM adapter contract points and evaluator entrypoints (`rake eval`, `rake eval:real`).
 
 ### Backward-compatibility commitments (pre-1.0)
@@ -415,6 +415,25 @@ The built-in `Engram::Extractors::LLMExtractor` continues to return plain record
 emit grounded provenance. Reads tolerate malformed or future provenance metadata, but writes
 fail closed when provenance is malformed or uses an unknown future schema version; upgrade an
 older writer before rewriting such records.
+
+### Source impact lookup
+
+To find which memories in a scope a host source produced, look them up by exact source
+reference:
+
+```ruby
+current_user.memory.memories_from_source(
+  source_id: "conversation:42",
+  source_type: "conversation"
+)
+```
+
+`source_id` and `source_type` must each be a non-blank String and are matched exactly, with no
+trimming or normalization. The lookup is bound to the scope and returns an `Array` of
+`Engram::Record` values (empty when nothing matches) — never source text. Result order follows
+the store adapter's enumeration and is not otherwise guaranteed. Source IDs are references,
+not an authorization boundary, so continue to enforce scope and your own source authorization.
+Legacy, malformed, and future-schema provenance do not match.
 
 ## Prompt-injection and memory-injection safety
 

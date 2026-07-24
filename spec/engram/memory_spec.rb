@@ -166,4 +166,30 @@ RSpec.describe Engram::Memory do
 
     expect(result).to include(scope: "user:1", updated: 1, processed: 1, skipped: 0)
   end
+
+  it "looks up memories from a source through the facade, bounded to the scope" do
+    source = Engram::Provenance::Source.new(
+      source_id: "conversation:42", source_type: "conversation", message_index: 0,
+      role: "user", spans: [Engram::Provenance::Span.new(start_offset: 0, end_offset: 1)],
+      alignment: :exact
+    )
+    provenance = Engram::Provenance.new(
+      sources: [source],
+      extractor: Engram::Provenance::Extractor.new(name: "host", model: "model-1"),
+      confidence: 0.9
+    )
+    store.add(Engram::Record.new(content: "mine", scope: "user:1",
+      embedding: embedder.embed("mine"), metadata: Engram::Provenance.attach({}, provenance)))
+    store.add(Engram::Record.new(content: "theirs", scope: "user:2",
+      embedding: embedder.embed("theirs"), metadata: Engram::Provenance.attach({}, provenance)))
+
+    results = memory.memories_from_source(source_id: "conversation:42", source_type: "conversation")
+
+    expect(results.map(&:content)).to eq(["mine"])
+  end
+
+  it "raises when the source lookup receives a blank identifier" do
+    expect { memory.memories_from_source(source_id: "  ", source_type: "conversation") }
+      .to raise_error(ArgumentError, /source_id/)
+  end
 end

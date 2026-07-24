@@ -13,6 +13,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   provenance while remaining compatible with plain `Engram::Record` results.
 - `Engram::Record#provenance` exposes understood supporting source IDs, alignments, and spans
   on recalled records while preserving tolerant reads for legacy and future schemas.
+- `Engram::Memory#memories_from_source` (and `Engram::UseCases::SourceImpact`) return the
+  records in a scope whose provenance references an exact host source. `source_id` and
+  `source_type` must each be a non-blank String and are matched exactly without trimming or
+  normalization. The lookup is scope-bound and returns only records, never source
+  text; source IDs are references, not an authorization boundary. Legacy, malformed, and
+  future-schema provenance do not match.
 
 ### Changed
 - Persistence accepts records without provenance, rejects structurally ungrounded provenance
