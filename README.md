@@ -373,6 +373,28 @@ record.provenance&.sources&.each do |source|
 end
 ```
 
+When the host application has authorized and loaded the referenced message, it can validate
+the source identity and span bounds before presenting supporting text:
+
+```ruby
+source = record.provenance.sources.first
+source_text = Engram::Provenance::SourceText.new(
+  source_id: source.source_id,
+  source_type: source.source_type,
+  message_index: source.message_index,
+  role: source.role,
+  text: authorized_message_body
+)
+
+source.validate_source_text!(source_text)
+source.supporting_text(source_text) # text for each zero-based, end-exclusive codepoint span
+```
+
+Validation fails when any source identity field differs or a span exceeds that one message.
+Offsets count Unicode codepoints, not bytes or user-perceived grapheme clusters.
+`exact` and `normalized` remain extractor assertions: this API verifies identity and bounds but
+does not claim that supporting text semantically entails the memory.
+
 `Record#provenance` returns `nil` for legacy records and for malformed or future schemas so
 reads remain compatible. Treat the returned source IDs and spans as untrusted references.
 They do not prove source access or authorize retrieving source content; applications must
@@ -387,7 +409,7 @@ Engram.configure do |config|
 end
 ```
 
-This validation is structural: Engram does not retain source text or verify that a span or
+Persistence validation is structural: Engram does not retain source text or verify that an
 alignment is truthful. Source IDs are host-owned references, not authorization boundaries.
 The built-in `Engram::Extractors::LLMExtractor` continues to return plain records and does not
 emit grounded provenance. Reads tolerate malformed or future provenance metadata, but writes

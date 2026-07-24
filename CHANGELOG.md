@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- Add an immutable host-supplied source-text contract that validates provenance source identity
+  and Unicode-codepoint span bounds, and resolves authorized supporting text without retaining
+  source transcripts.
 - Optional `Engram::Extraction` results let custom extractors attach versioned source
   provenance while remaining compatible with plain `Engram::Record` results.
 - `Engram::Record#provenance` exposes understood supporting source IDs, alignments, and spans
