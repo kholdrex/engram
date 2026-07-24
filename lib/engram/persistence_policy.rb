@@ -16,14 +16,24 @@ module Engram
       /\b(?:today|now|this session)\b.*\b(?:fixed|resolved|done|completed|finished)\b/i
     ].freeze
 
-    def initialize(denylist_patterns: [])
+    def initialize(denylist_patterns: [], allow_ungrounded: false)
       @denylist_patterns = denylist_patterns
+      @allow_ungrounded = BasicObject.instance_method(:equal?).bind_call(allow_ungrounded, true)
     end
 
     def call(record)
+      provenance = Engram::Provenance.extract_for_persistence(record.metadata)
+      return nil if provenance&.ungrounded? && !@allow_ungrounded
       return nil if reject?(record.content)
 
       redact(record)
+    end
+
+    # Destructive authorization is deliberately independent from write-content filtering and
+    # redaction. Provenance trust still applies, but secret/transient content can always be removed.
+    def allow_destructive?(record)
+      provenance = Engram::Provenance.extract_for_persistence(record.metadata)
+      !provenance&.ungrounded? || @allow_ungrounded
     end
 
     private

@@ -23,7 +23,7 @@ RSpec.describe "gem packaging" do
     expect(spec.files).to include("lib/engram/rails/tasks.rake")
   end
 
-  it "declares no hard runtime dependencies" do
+  it "keeps the core free of hard runtime dependencies" do
     expect(spec.runtime_dependencies).to be_empty
   end
 

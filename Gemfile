@@ -11,7 +11,7 @@ group :development, :test do
 end
 
 # Dependencies exercised only by the optional adapters and integration tests.
-# Kept out of the gemspec so the core stays dependency-free. The CI integration job is the
+# Kept out of the gemspec so the core has zero runtime dependencies. The CI integration job is the
 # only one that installs this group; the lint/test jobs run with BUNDLE_WITHOUT=integration.
 group :integration do
   gem "rails", ">= 7.1" # railties + activerecord + activejob for the Rails integration specs

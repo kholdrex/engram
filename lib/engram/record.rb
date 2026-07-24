@@ -8,6 +8,10 @@ module Engram
   # `kind` is a memory type (fact / preference / instruction / episodic). The legacy
   # `semantic` kind is normalized to `fact` for compatibility with pre-1.0 records.
   class Record
+    STATE_READERS = %i[
+      id content scope embedding kind importance metadata created_at last_accessed_at
+    ].freeze
+
     attr_accessor :id, :last_accessed_at
     attr_reader :content, :embedding, :scope, :kind, :importance, :metadata,
       :created_at
@@ -30,11 +34,7 @@ module Engram
     end
 
     def to_h
-      {
-        id: id, content: content, scope: scope, embedding: embedding, kind: kind,
-        importance: importance, metadata: metadata,
-        created_at: created_at, last_accessed_at: last_accessed_at
-      }
+      STATE_READERS.to_h { |reader| [reader, public_send(reader)] }
     end
   end
 end

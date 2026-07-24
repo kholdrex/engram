@@ -5,6 +5,41 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- Optional `Engram::Extraction` results let custom extractors attach versioned source
+  provenance while remaining compatible with plain `Engram::Record` results.
+
+### Changed
+- Persistence accepts records without provenance, rejects structurally ungrounded provenance
+  by default (configurable only with the exact boolean `allow_ungrounded: true`), and fails closed on malformed or
+  unknown future provenance during writes while keeping reads tolerant. Provenance validation
+  does not verify source text, and source IDs are references rather than authorization
+  boundaries. The built-in LLM extractor does not emit grounded provenance.
+- Existing `before_persist` hooks may continue to transform record content or embeddings, but
+  may neither add, remove, nor alter provenance; this restriction includes legacy records with
+  no provenance.
+- Extractors must return an `Array`; each result may be a plain `Engram::Record` or an
+  `Engram::Extraction` carrying provenance.
+- Custom consolidator decisions must reference the actual same-scope `Engram::Record` instance
+  supplied for reconciliation and must treat both the candidates array and records as read-only.
+  Engram now fails closed on collection replacement/reordering/iteration overrides and on
+  security-relevant nested value, identity/alias/topology, frozen-state, custom-behavior, or
+  hidden-state changes before destructive authorization. Arbitrary application metadata values
+  remain opaque and preserve their identity without invoking equality or serialization behavior;
+  provenance is independently parsed and integrity-protected.
+  Substituted, modified, missing, malformed, or cross-scope candidates fail closed.
+  `Observe` preflights the complete decision batch, including persistence policy and hook
+  transformations, before beginning store mutations.
+
+### Fixed
+- Observation rejects extractor candidates with caller-supplied IDs, and `InMemoryStore#add`
+  always allocates a fresh ID like the pgvector adapter, preventing same- or cross-scope record
+  replacement through add semantics.
+- `forget` now separates destructive provenance authorization from write-content filtering and
+  redaction, so secret or transient memories can be deleted. Custom policies may implement
+  `allow_destructive?` with a strict boolean return; write-only policies no longer authorize
+  deletion through their `call` result.
+
 ## [0.5.0] - 2026-07-17
 
 ### Added

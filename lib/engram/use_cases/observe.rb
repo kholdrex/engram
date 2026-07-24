@@ -49,8 +49,9 @@ module Engram
               next []
             end
 
-            decisions = consolidate(candidates: candidates, scope: scope)
-            applied_decisions = decisions.filter_map { |decision| apply(decision, scope) }
+            decisions, candidate_budget, detached_by_candidate = consolidate(candidates: candidates, scope: scope)
+            operations = preflight(decisions, candidate_budget, detached_by_candidate, scope)
+            applied_decisions = operations.filter_map { |operation| apply(operation, scope) }
             payload[:decision_count] = applied_decisions.size
             payload[:decision_actions] = applied_decisions.map { |decision| decision.action.to_s }
             complete_claim(scope, idempotency_key, claim)
@@ -79,36 +80,288 @@ module Engram
       def extract(messages:, scope:)
         payload = Engram::Instrumentation.payload(scope: scope, store: @store, message_count: messages.size)
         Engram::Instrumentation.instrument("extract", payload) do
-          candidates = @extractor.extract(messages: messages, scope: scope)
+          candidates = normalize_extractions(@extractor.extract(messages: messages, scope: scope))
           payload[:candidate_count] = candidates.size
           candidates
         end
       end
 
+      def normalize_extractions(results)
+        unless core_array?(results)
+          raise Engram::Error, "extractor must return an Array containing only Engram::Record or Engram::Extraction values"
+        end
+
+        core_array_map(results) do |result|
+          candidate = case result
+          when Engram::Record then normalize_record(result)
+          when Engram::Extraction then normalize_record(result.to_record)
+          else
+            raise Engram::Error, "extractor must return an Array containing only Engram::Record or Engram::Extraction values"
+          end
+
+          raise Engram::Error, "observation candidates must not have an id" unless candidate.id.nil?
+
+          candidate
+        end
+      rescue Engram::Internal::CandidateIntegrity::Error => error
+        raise Engram::Error, error.message
+      end
+
+      def normalize_record(record)
+        if Object.instance_method(:instance_of?).bind_call(record, Engram::Record)
+          candidate_integrity.validate!(record)
+          return record
+        end
+
+        candidate_integrity.detach(record)
+      rescue Engram::Internal::CandidateIntegrity::Error => error
+        raise Engram::Error, error.message
+      end
+
       def consolidate(candidates:, scope:)
         payload = Engram::Instrumentation.payload(scope: scope, store: @store, candidate_count: candidates.size)
         Engram::Instrumentation.instrument("consolidate", payload) do
-          decisions = @consolidator.reconcile_all(candidates: candidates, scope: scope)
+          candidate_snapshot = snapshot_candidates(candidates)
+          detached_candidates = detach_candidates(candidates)
+          candidate_budget, detached_by_candidate = candidate_context(candidates, detached_candidates)
+          raw_decisions = @consolidator.reconcile_all(candidates: candidates, scope: scope)
+          decisions = canonicalize_decisions(raw_decisions)
+          verify_candidates!(candidates, candidate_snapshot)
+
           payload[:decision_count] = decisions.size
           payload[:decision_actions] = decisions.map { |decision| decision.action.to_s }
-          decisions
+          [decisions, candidate_budget, detached_by_candidate]
         end
       end
 
-      def apply(decision, scope)
+      def snapshot_candidates(candidates)
+        candidate_integrity.snapshot(candidates)
+      rescue Engram::Internal::CandidateIntegrity::Error => error
+        raise Engram::Error, error.message
+      end
+
+      def verify_candidates!(candidates, snapshot)
+        candidate_integrity.verify!(candidates, snapshot)
+      rescue Engram::Internal::CandidateIntegrity::Error => error
+        raise Engram::Error, error.message
+      end
+
+      def detach_candidates(candidates)
+        candidates.map { |candidate| candidate_integrity.detach(candidate) }
+      rescue Engram::Internal::CandidateIntegrity::Error => error
+        raise Engram::Error, error.message
+      end
+
+      def candidate_context(candidates, detached_candidates)
+        candidate_budget = Hash.new(0).compare_by_identity
+        detached_by_candidate = {}.compare_by_identity
+        candidates.zip(detached_candidates) do |candidate, detached|
+          candidate_budget[candidate] += 1
+          (detached_by_candidate[candidate] ||= []) << detached
+        end
+        [candidate_budget, detached_by_candidate]
+      end
+
+      def candidate_integrity
+        @candidate_integrity ||= Engram::Internal::CandidateIntegrity.new
+      end
+
+      def canonicalize_decisions(raw_decisions)
+        unless core_array?(raw_decisions)
+          raise Engram::Error, "consolidator must return an Array of Engram::Decision values"
+        end
+
+        core_array_map(raw_decisions) do |raw_decision|
+          unless Object.instance_method(:is_a?).bind_call(raw_decision, Engram::Decision)
+            raise Engram::Error, "consolidator must return an Array of Engram::Decision values"
+          end
+
+          action = raw_decision.action
+          candidate = raw_decision.candidate
+          target_id = canonical_target_id(raw_decision.target_id)
+          reason = raw_decision.reason
+          unless Engram::Decision::ACTIONS.include?(action)
+            raise Engram::Error, "unsupported decision action #{action.inspect}"
+          end
+
+          Engram::Decision.new(action: action, candidate: candidate, target_id: target_id, reason: reason)
+        end
+      end
+
+      # Array subclasses are supported, but checks and traversal at an untrusted
+      # return boundary must not dispatch through singleton or subclass behavior.
+      def core_array?(value)
+        Object.instance_method(:is_a?).bind_call(value, Array)
+      rescue TypeError
+        false
+      end
+
+      def core_array_map(values)
+        mapped = []
+        Array.instance_method(:each).bind_call(values) { |value| mapped << yield(value) }
+        mapped
+      end
+
+      def canonical_target_id(target_id)
+        return if BasicObject.instance_method(:equal?).bind_call(target_id, nil)
+
+        target_class = Object.instance_method(:class).bind_call(target_id)
+        valid_class = target_class.equal?(Integer) || target_class.equal?(String)
+        valid_state = Object.instance_method(:instance_variables).bind_call(target_id).empty?
+        unless valid_class && valid_state
+          raise Engram::Error, "decision target_id must be a plain String or Integer"
+        end
+
+        return target_id if target_class.equal?(Integer)
+
+        if custom_behavior?(target_id, target_class)
+          raise Engram::Error, "decision target_id must be a plain String or Integer"
+        end
+
+        String.instance_method(:dup).bind_call(target_id)
+      rescue TypeError
+        raise Engram::Error, "decision target_id must be a plain String or Integer"
+      end
+
+      def custom_behavior?(value, value_class)
+        singleton_class = Object.instance_method(:singleton_class).bind_call(value)
+        return false if singleton_class.equal?(value_class)
+
+        method_visibilities = %i[
+          public_instance_methods protected_instance_methods private_instance_methods
+        ]
+        return true if method_visibilities.any? do |visibility|
+          Module.instance_method(visibility).bind_call(singleton_class, false).any?
+        end
+
+        singleton_ancestors = Module.instance_method(:ancestors).bind_call(singleton_class)
+        class_ancestors = Module.instance_method(:ancestors).bind_call(value_class)
+        return true unless singleton_ancestors.length == class_ancestors.length + 1 &&
+          class_ancestors.each_with_index.all? { |ancestor, index| singleton_ancestors[index + 1].equal?(ancestor) }
+
+        method_visibilities.any? do |visibility|
+          singleton_methods = Module.instance_method(visibility).bind_call(singleton_class, true)
+          class_methods = Module.instance_method(visibility).bind_call(value_class, true)
+          singleton_methods.length != class_methods.length ||
+            singleton_methods.any? { |method_name| !class_methods.include?(method_name) }
+        end
+      end
+
+      def preflight(decisions, candidate_budget, detached_by_candidate, scope)
+        decision_counts = Hash.new(0).compare_by_identity
+        safe_decisions = []
+
+        decisions.each do |decision|
+          unless decision.is_a?(Engram::Decision)
+            raise Engram::Error, "consolidator must return an Array of Engram::Decision values"
+          end
+          unless Engram::Decision::ACTIONS.include?(decision.action)
+            raise Engram::Error, "unsupported decision action #{decision.action.inspect}"
+          end
+          unless Object.instance_method(:is_a?).bind_call(decision.candidate, Engram::Record)
+            message = if decision.action == :forget
+              "forget decision candidate must be an Engram::Record"
+            else
+              "decision candidate must be an Engram::Record"
+            end
+            raise Engram::Error, message
+          end
+          unless candidate_budget.key?(decision.candidate)
+            raise Engram::Error, "decision must reference the actual candidate supplied to the consolidator"
+          end
+          decision_counts[decision.candidate] += 1
+          if decision_counts[decision.candidate] > candidate_budget.fetch(decision.candidate)
+            raise Engram::Error,
+              "consolidator must return no more than one decision per candidate occurrence; " \
+              "multiple decisions reference the same candidate"
+          end
+          detached_candidate = detached_by_candidate.fetch(decision.candidate).fetch(
+            decision_counts.fetch(decision.candidate) - 1
+          )
+          unless Engram::Internal::Scope.record_matches?(detached_candidate, scope)
+            raise Engram::Error, "cannot move memory across scopes"
+          end
+
+          if %i[update forget].include?(decision.action) && !decision.target_id
+            raise Engram::Error, "#{decision.action} decision requires a target_id"
+          end
+
+          if %i[add update forget].include?(decision.action)
+            Engram::Provenance.extract_for_persistence(detached_candidate.metadata)
+          end
+          safe_decisions << Engram::Decision.new(action: decision.action, candidate: detached_candidate,
+            target_id: decision.target_id, reason: decision.reason)
+        end
+
+        preflight_destructive_targets!(safe_decisions, scope)
+        decisions.zip(safe_decisions).map do |result_decision, safe_decision|
+          prepare_operation(safe_decision, scope, result_decision)
+        end
+      end
+
+      def preflight_destructive_targets!(decisions, scope)
+        target_ids = decisions.filter_map do |decision|
+          decision.target_id if %i[update forget].include?(decision.action)
+        end
+        return if target_ids.empty?
+
+        duplicate_id = target_ids.tally.find { |_, count| count > 1 }&.first
+        if duplicate_id
+          raise Engram::Error, "multiple decisions target memory #{duplicate_id.inspect}"
+        end
+
+        existing_ids = scoped_existing_ids(scope, target_ids)
+        existing_id_lookup = existing_ids.each_with_object({}) { |id, lookup| lookup[id] = true }
+        missing_id = target_ids.find { |target_id| !existing_id_lookup[target_id] }
+        if missing_id
+          raise Engram::Error, "no memory with id #{missing_id.inspect} in scope #{scope.inspect}"
+        end
+      end
+
+      def scoped_existing_ids(scope, target_ids)
+        if @store.respond_to?(:existing_ids)
+          begin
+            return Array(@store.existing_ids(scope: scope, ids: target_ids))
+          rescue NotImplementedError
+            # Optional capability: legacy adapters may inherit the default stub.
+          end
+        end
+
+        @store.all(scope: scope).map(&:id)
+      end
+
+      def prepare_operation(decision, scope, result_decision)
+        prepared = case decision.action
+        when :add
+          persistence.prepare(decision.candidate)
+        when :update
+          persistence.prepare(decision.candidate) if decision.target_id
+        when :forget
+          persistence.allowed?(decision.candidate) if decision.target_id
+        end
+
+        if %i[add update].include?(decision.action) && prepared &&
+            !Engram::Internal::Scope.record_matches?(prepared, scope)
+          raise Engram::Error, "cannot move memory across scopes"
+        end
+
+        [result_decision, decision, prepared]
+      end
+
+      def apply(operation, scope)
+        result_decision, decision, prepared = operation
         case decision.action
         when :add
-          raise Engram::Error, "cannot move memory across scopes" unless decision.candidate.scope == scope
-
-          decision if persistence.add(decision.candidate, scope: scope)
+          result_decision if prepared && persistence.add_prepared(prepared, scope: scope)
         when :update
-          if decision.target_id && persistence.update(scope: scope, id: decision.target_id, record: decision.candidate)
-            decision
+          if decision.target_id && prepared &&
+              persistence.update_prepared(scope: scope, id: decision.target_id, record: prepared)
+            result_decision
           end
         when :forget
-          if decision.target_id
+          if decision.target_id && prepared
             deleted = @store.delete(scope: scope, id: decision.target_id)
-            decision if deleted && deleted != 0
+            result_decision if deleted && deleted != 0
           end
         when :noop
           nil

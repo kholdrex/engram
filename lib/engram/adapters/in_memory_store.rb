@@ -15,7 +15,7 @@ module Engram
       def add(record)
         validate_scope!(record.scope)
 
-        record.id ||= (@sequence += 1)
+        record.id = (@sequence += 1)
         @records[record.id] = record
         record
       end
@@ -42,6 +42,10 @@ module Engram
         records = records.drop(offset) if offset > 0
         records = records.take(limit) if limit
         records
+      end
+
+      def existing_ids(scope:, ids:)
+        ids.uniq.select { |id| @records[id]&.scope == scope }
       end
 
       def update(scope:, id:, record:)

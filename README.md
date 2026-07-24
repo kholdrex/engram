@@ -52,7 +52,7 @@ chat.ask("Why am I being rate limited?")
 
 ## Feature overview
 
-- Zero-dependency pure Ruby core with in-memory defaults for tests and local development.
+- Pure Ruby core with zero runtime dependencies and in-memory defaults for tests and local development.
 - Rails `has_memory` macro, install generator, and background `observe_later` job.
 - Postgres + pgvector storage through an optional ActiveRecord/neighbor adapter.
 - RubyLLM embedder and completion adapters for provider-backed embeddings and extraction.
@@ -103,7 +103,7 @@ Use `CHANGELOG.md` as the authoritative source for breaking/compatibility change
 gem "engram"
 ```
 
-The core has **zero runtime dependencies**. Optional adapters need host-app dependencies:
+The core has zero runtime dependencies and does not require Rails, ActiveRecord, or a database. Optional adapters need host-app dependencies:
 
 - `Engram::Adapters::PgvectorStore` → ActiveRecord + `neighbor` + Postgres/pgvector
 - `Engram::Adapters::RubyLLMEmbedder` and `Engram::Adapters::RubyLLMCompletion` → `ruby_llm`
@@ -291,6 +291,25 @@ memory.observe([
 # extracts "User is on the Pro plan", and if a "Free plan" memory exists, updates it
 ```
 
+### Custom consolidator candidate contract
+
+`reconcile_all(candidates:, scope:)` receives a plain `Array` of plain `Engram::Record`
+instances. A custom consolidator may inspect candidates and return decisions that reference
+those exact instances, but it must not replace, append, remove, or reorder collection entries;
+override collection iteration; add collection or record state or behavior; or mutate the
+records. Engram verifies record and collection integrity before it authorizes any add, update,
+or deletion and fails closed on a violation.
+
+Plain arrays and hashes in candidate state are detached without serializing their leaves.
+Core scalar/container state is integrity-protected without dispatching overridden traversal or
+equality. Arbitrary application metadata values (including value objects, procs, and IO) remain
+opaque, retain their identity, and are never compared or serialized by the integrity check.
+Their internal mutable state is consequently outside that check; provenance remains parsed and
+validated independently before any authorization. Containers must be acyclic, hashes cannot
+have default procs, and behavior-bearing core values remain unsupported.
+Extracted candidates must also have a nil `id`: IDs are store-owned and are allocated only
+when an add is persisted.
+
 ## Memory kinds and persistence policy
 
 Every memory has a normalized `kind`:
@@ -328,6 +347,37 @@ Engram.configure do |config|
   )
 end
 ```
+
+Write-content filtering and transformation are not deletion authorization. `forget` still
+validates scope, target existence, candidate integrity, and provenance, but it does not run
+`before_persist` or the policy's `call` method; this allows secret, transient, and redacted
+memories to be removed. A custom policy can additionally control destructive decisions by
+implementing `allow_destructive?(record)` and returning exactly `true` or `false`. Policies
+that only implement `call` affect writes but do not prevent deletion. The built-in policy uses
+this separate hook to retain its ungrounded-provenance protection.
+
+### Extraction provenance
+
+Custom extractors remain compatible when they return an array of plain `Engram::Record`
+values. They may instead return `Engram::Extraction` values to attach optional structured
+`Engram::Provenance` to a candidate; arrays may contain either type. Records with no
+provenance remain accepted.
+
+By default, the persistence policy rejects provenance containing a source marked
+`ungrounded`. Applications that intentionally accept it can opt out:
+
+```ruby
+Engram.configure do |config|
+  config.persistence_policy = Engram::PersistencePolicy.new(allow_ungrounded: true)
+end
+```
+
+This validation is structural: Engram does not retain source text or verify that a span or
+alignment is truthful. Source IDs are host-owned references, not authorization boundaries.
+The built-in `Engram::Extractors::LLMExtractor` continues to return plain records and does not
+emit grounded provenance. Reads tolerate malformed or future provenance metadata, but writes
+fail closed when provenance is malformed or uses an unknown future schema version; upgrade an
+older writer before rewriting such records.
 
 ## Prompt-injection and memory-injection safety
 
