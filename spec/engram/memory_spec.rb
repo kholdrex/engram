@@ -192,4 +192,25 @@ RSpec.describe Engram::Memory do
     expect { memory.memories_from_source(source_id: "  ", source_type: "conversation") }
       .to raise_error(ArgumentError, /source_id/)
   end
+
+  it "reports grounding coverage bound to the facade scope" do
+    source = Engram::Provenance::Source.new(
+      source_id: "conversation:42", source_type: "conversation", message_index: 0,
+      role: "user", spans: [Engram::Provenance::Span.new(start_offset: 0, end_offset: 1)],
+      alignment: :exact
+    )
+    provenance = Engram::Provenance.new(
+      sources: [source],
+      extractor: Engram::Provenance::Extractor.new(name: "host", model: "model-1"),
+      confidence: 0.9
+    )
+    store.add(Engram::Record.new(content: "mine", scope: "user:1",
+      embedding: embedder.embed("mine"), metadata: Engram::Provenance.attach({}, provenance)))
+    store.add(Engram::Record.new(content: "theirs", scope: "user:2",
+      embedding: embedder.embed("theirs")))
+
+    expect(memory.grounding_report).to eq(
+      exact: 1, normalized: 0, inferred: 0, ungrounded: 0, unattributed: 0, total: 1
+    )
+  end
 end

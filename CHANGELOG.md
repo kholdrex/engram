@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- `Engram::Memory#grounding_report` (and `Engram::UseCases::GroundingReport`) returns frozen,
+  scope-bound record counts by weakest source alignment, with legacy or unrecognized provenance
+  counted as unattributed and no record or source text exposed.
 - Add an immutable host-supplied source-text contract that validates provenance source identity
   and Unicode-codepoint span bounds, and resolves authorized supporting text without retaining
   source transcripts.

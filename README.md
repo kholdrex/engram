@@ -435,6 +435,20 @@ the store adapter's enumeration and is not otherwise guaranteed. Source IDs are 
 not an authorization boundary, so continue to enforce scope and your own source authorization.
 Legacy, malformed, and future-schema provenance do not match.
 
+### Grounding report
+
+To measure provenance grounding coverage without exposing record or source text, request the
+scope-bound report:
+
+```ruby
+current_user.memory.grounding_report
+# => {exact: 12, normalized: 3, inferred: 2, ungrounded: 1, unattributed: 4, total: 22}
+```
+
+Each record is counted once by its weakest source alignment (`exact`, `normalized`, `inferred`,
+then `ungrounded`). Records with no understood provenance, including legacy, malformed, and
+future-schema provenance, count as `unattributed`. The returned counts-only Hash is frozen.
+
 ## Prompt-injection and memory-injection safety
 
 Injected memories are rendered as typed XML-like elements with escaped content, which keeps

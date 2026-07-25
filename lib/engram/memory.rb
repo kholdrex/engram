@@ -113,6 +113,12 @@ module Engram
         .call(scope: scope, source_id: source_id, source_type: source_type)
     end
 
+    # Count memories by their weakest provenance source alignment. Records whose
+    # provenance is absent or not understood are counted as unattributed.
+    def grounding_report
+      UseCases::GroundingReport.new(store: @store).call(scope: scope)
+    end
+
     private
 
     def persist(record)
