@@ -5,6 +5,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-07-24
+
 ### Added
 - `Engram::Memory#grounding_report` (and `Engram::UseCases::GroundingReport`) returns frozen,
   scope-bound record counts by weakest source alignment, with legacy or unrecognized provenance
