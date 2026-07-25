@@ -4,8 +4,8 @@ module Engram
   module UseCases
     # Count records in a scope by their weakest understood source alignment.
     class GroundingReport
-      ALIGNMENTS = %i[exact normalized inferred ungrounded].freeze
-      private_constant :ALIGNMENTS
+      ALIGNMENT_RANK = Engram::Provenance::ALIGNMENTS.each_with_index.to_h.freeze
+      private_constant :ALIGNMENT_RANK
 
       def initialize(store:)
         @store = store
@@ -34,7 +34,10 @@ module Engram
       private
 
       def weakest_alignment(provenance)
-        provenance.sources.map(&:alignment).max_by { |alignment| ALIGNMENTS.index(alignment) }
+        alignments = provenance.sources.map(&:alignment)
+        return unless alignments.all? { |alignment| ALIGNMENT_RANK.key?(alignment) }
+
+        alignments.max_by { |alignment| ALIGNMENT_RANK.fetch(alignment) }
       end
     end
   end

@@ -49,10 +49,22 @@ RSpec.describe Engram::UseCases::GroundingReport do
   end
 
   it "classifies a mixed-source record by its weakest alignment" do
-    seed_with_provenance("mixed", :exact, :inferred, :normalized)
+    seed_with_provenance("mixed", :exact, :ungrounded)
 
     expect(grounding_report.call(scope: "u:1")).to eq(
-      exact: 0, normalized: 0, inferred: 1, ungrounded: 0, unattributed: 0, total: 1
+      exact: 0, normalized: 0, inferred: 0, ungrounded: 1, unattributed: 0, total: 1
+    )
+  end
+
+  it "degrades an anomalous parsed source alignment to unattributed without reading content" do
+    anomalous_source = instance_double(Engram::Provenance::Source, alignment: :unexpected)
+    parsed_provenance = instance_double(Engram::Provenance, sources: [source(:exact), anomalous_source])
+    record = double("record", scope: "u:1", id: nil, provenance: parsed_provenance)
+    allow(record).to receive(:id=)
+    store.add(record)
+
+    expect(grounding_report.call(scope: "u:1")).to eq(
+      exact: 0, normalized: 0, inferred: 0, ungrounded: 0, unattributed: 1, total: 1
     )
   end
 
