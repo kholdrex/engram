@@ -251,7 +251,7 @@ module Engram
 
           with_acyclic_value(value, active) do
             entries = []
-            Hash.instance_method(:each_pair).bind_call(value) do |key, nested_value|
+            Engram::Internal::CoreHash.each_pair(value) do |key, nested_value|
               entries << [
                 canonical_metadata_value(key, active, depth + 1),
                 canonical_metadata_value(nested_value, active, depth + 1)
@@ -468,7 +468,7 @@ module Engram
 
         with_acyclic_value(value, active) do
           entries = []
-          Hash.instance_method(:each_pair).bind_call(value) do |key, nested_value|
+          Engram::Internal::CoreHash.each_pair(value) do |key, nested_value|
             entries << [
               canonical_value(key, active, depth + 1),
               canonical_value(nested_value, active, depth + 1)
