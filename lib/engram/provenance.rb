@@ -297,7 +297,7 @@ module Engram
         end
         string_reserved = []
         symbol_reserved = []
-        Hash.instance_method(:each_pair).bind_call(metadata) do |key, value|
+        Engram::Internal::CoreHash.each_pair(metadata) do |key, value|
           case reserved_key_style(key)
           when :string then string_reserved << value
           when :symbol then symbol_reserved << value
@@ -306,7 +306,7 @@ module Engram
 
         reserved = (string_reserved + symbol_reserved).reduce({}) do |merged, value|
           siblings = {}
-          Hash.instance_method(:each_pair).bind_call(value) do |key, nested|
+          Engram::Internal::CoreHash.each_pair(value) do |key, nested|
             siblings[key] = nested unless provenance_key_alias?(key)
           end
           Engram::ReservedMetadata.merge(merged, Engram::ReservedMetadata.normalize(siblings))
@@ -348,7 +348,7 @@ module Engram
       # behavior supplied by a Hash subclass or singleton class.
       def core_hash_values(hash, string_key, symbol_key)
         values = []
-        Hash.instance_method(:each_pair).bind_call(hash) do |key, value|
+        Engram::Internal::CoreHash.each_pair(hash) do |key, value|
           values << value if core_key_equal?(key, string_key, symbol_key)
         end
         values
@@ -373,7 +373,7 @@ module Engram
         if core_kind_of?(value, Hash)
           with_acyclic_container(value, active) do
             copy = {}
-            Hash.instance_method(:each_pair).bind_call(value) do |key, nested|
+            Engram::Internal::CoreHash.each_pair(value) do |key, nested|
               normalized_key = provenance_key(key)
               normalized_value = detach_nested_provenance(nested, active, depth)
               if copy.key?(normalized_key)
@@ -447,7 +447,7 @@ module Engram
         value_class = Object.instance_method(:class).bind_call(value)
         if value_class.equal?(Hash)
           fields = {}
-          Hash.instance_method(:each_pair).bind_call(value) do |key, nested|
+          Engram::Internal::CoreHash.each_pair(value) do |key, nested|
             fields[key] = provenance_integrity_representation(nested)
           end
           return [:object, fields]

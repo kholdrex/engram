@@ -48,6 +48,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   transformations, before beginning store mutations.
 
 ### Fixed
+- Provenance canonicalization now iterates untrusted metadata through core `Hash#keys`/`#values`
+  by position instead of `Hash#each_pair`. On Ruby 3.4 a caller-supplied hash left in a
+  delete-then-insert collision state could make `Hash#each_pair` invoke a key's `#eql?` mid-iteration,
+  letting a hostile `String`-subclass key run application code inside the behavior-free canonicalizer.
+  The adversarial hostile-key suite is now deterministic across Ruby 3.2–3.4.
 - Observation rejects extractor candidates with caller-supplied IDs, and `InMemoryStore#add`
   always allocates a fresh ID like the pgvector adapter, preventing same- or cross-scope record
   replacement through add semantics.
