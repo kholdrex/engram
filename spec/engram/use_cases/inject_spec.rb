@@ -58,4 +58,49 @@ RSpec.describe Engram::UseCases::Inject do
     out = described_class.new(header: "# Context").call(prompt: "P", memories: [mem("x")])
     expect(out).to include("# Context:")
   end
+
+  describe "byte budget" do
+    let(:prompt) { "Host prompt " * 100 }
+    let(:memories) { [mem("Привіт & <hello> 🌍", kind: :preference), mem("second")] }
+
+    it "counts the entire escaped suffix in bytes, excluding the original prompt" do
+      full = inject.call(prompt: prompt, memories: memories)
+      budget = full.bytesize - prompt.bytesize
+
+      expect(inject.call(prompt: prompt, memories: memories, max_bytes: budget)).to eq(full)
+      smaller = inject.call(prompt: prompt, memories: memories, max_bytes: budget - 1)
+      expect(smaller.bytesize - prompt.bytesize).to be <= budget - 1
+      expect(smaller).to include("Привіт &amp; &lt;hello&gt; 🌍")
+      expect(smaller).not_to include("second")
+      expect(smaller).to end_with("</engram-memories>")
+      expect(smaller).to be_valid_encoding
+    end
+
+    it "skips an oversized memory and considers smaller later ones without truncation" do
+      small = mem("small")
+      expected = inject.call(prompt: prompt, memories: [small])
+      result = inject.call(prompt: prompt, memories: [mem("large" * 500), small],
+        max_bytes: expected.bytesize - prompt.bytesize)
+
+      expect(result).to eq(expected)
+    end
+
+    it "leaves the prompt unchanged with no empty wrapper when nothing fits" do
+      [0, 1, 50].each do |budget|
+        expect(inject.call(prompt: prompt, memories: memories, max_bytes: budget)).to equal(prompt)
+      end
+    end
+
+    it "includes the custom header in the budget" do
+      custom = described_class.new(header: "Довгий заголовок" * 30)
+      expect(custom.call(prompt: prompt, memories: memories, max_bytes: 200)).to eq(prompt)
+    end
+
+    it "rejects invalid budgets even when there are no memories" do
+      [-1, 1.5, "200", false, Float::INFINITY].each do |budget|
+        expect { inject.call(prompt: prompt, memories: [], max_bytes: budget) }
+          .to raise_error(ArgumentError, /max_bytes/)
+      end
+    end
+  end
 end

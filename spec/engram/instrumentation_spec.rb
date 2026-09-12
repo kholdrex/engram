@@ -117,4 +117,33 @@ RSpec.describe "Engram instrumentation" do
       duration_ms: be_a(Float).or(be_a(Integer))
     )
   end
+
+  it "reports threshold exclusions without content or vector data" do
+    allow(embedder).to receive(:embed).and_return([1.0, 0.0])
+    store.add(Engram::Record.new(content: "private memory", scope: "u:1", embedding: [0.0, 1.0]))
+    Engram::UseCases::Recall.new(store: store, embedder: embedder)
+      .call("private query", scope: "u:1", min_similarity: 0.5)
+
+    payload = events.fetch(0).last
+    expect(payload).to include(candidate_count: 1, filtered_count: 1, result_count: 0, min_similarity: 0.5)
+    expect(payload.values.join(" ")).not_to include("private")
+    expect(payload).not_to have_key(:embedding)
+  end
+
+  it "reports the actual appended bytes and skipped memory count" do
+    output = Engram::UseCases::Inject.new.call(prompt: "P", max_bytes: 200,
+      memories: [Engram::Record.new(content: "large" * 200, scope: "u:1"),
+        Engram::Record.new(content: "small", scope: "u:1")])
+
+    payload = events.fetch(0).last
+    expect(payload).to include(memory_count: 2, injected_count: 1, skipped_count: 1,
+      injected_bytes: output.bytesize - 1, max_bytes: 200)
+    expect(payload.values.join(" ")).not_to include("large", "small")
+  end
+
+  it "emits zero counts when recall is disabled" do
+    Engram::UseCases::Recall.new(store: store, embedder: embedder).call("q", scope: "u:1", limit: 0)
+
+    expect(events.fetch(0).last).to include(candidate_count: 0, filtered_count: 0, result_count: 0)
+  end
 end

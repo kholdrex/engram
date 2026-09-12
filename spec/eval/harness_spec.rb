@@ -56,6 +56,31 @@ RSpec.describe "eval harness" do
     expect(result).to eq(true)
   end
 
+  it "measures irrelevant retrieval and abstention when sweeping the similarity threshold" do
+    fixtures = {
+      memories: ["relevant memory"],
+      recall_queries: [
+        {query: "positive query", relevant: ["relevant memory"]},
+        {query: "negative query", relevant: []}
+      ]
+    }
+    stub_const("Engram::EVAL_FIXTURES", fixtures)
+    semantic_embedder = Object.new
+    def semantic_embedder.embed(text)
+      (text == "negative query") ? [0.0, 1.0] : [1.0, 0.0]
+    end
+
+    with_env("MIN_SIMILARITY" => nil) do
+      baseline = silence_stdout { Engram::Eval.run_recall(semantic_embedder) }
+      expect(baseline).to include(negative_false_positives: 1, negative_abstentions: 0, hit_count: 1)
+    end
+    with_env("MIN_SIMILARITY" => "0.5") do
+      filtered = silence_stdout { Engram::Eval.run_recall(semantic_embedder) }
+      expect(filtered).to include(negative_false_positives: 0, negative_abstentions: 1, hit_count: 1,
+        min_similarity: 0.5, semantic_metrics_available: true)
+    end
+  end
+
   it "runs the scripted consolidation smoke cases" do
     result = silence_stdout { Engram::Eval.run_consolidation(embedder) }
 

@@ -14,9 +14,15 @@ RSpec.describe Engram do
 
   describe ".reset!" do
     it "restores defaults" do
-      Engram.configure { |c| c.default_limit = 99 }
+      Engram.configure do |c|
+        c.default_limit = 99
+        c.recall_min_similarity = 0.5
+        c.injection_max_bytes = 8_000
+      end
       Engram.reset!
       expect(Engram.config.default_limit).to eq(5)
+      expect(Engram.config.recall_min_similarity).to be_nil
+      expect(Engram.config.injection_max_bytes).to be_nil
     end
   end
 

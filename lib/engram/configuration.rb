@@ -8,13 +8,16 @@ module Engram
     attr_accessor :store, :embedder, :completion, :default_limit,
       :consolidator, :extraction_min_confidence, :processed_turns,
       :importance_weight, :recency_weight, :recency_halflife, :touch_on_recall,
-      :persistence_policy, :before_persist, :instrumentation_scope_identifier
+      :persistence_policy, :before_persist, :instrumentation_scope_identifier,
+      :recall_min_similarity, :injection_max_bytes
 
     def initialize
       @store = Adapters::InMemoryStore.new
       @embedder = Adapters::NullEmbedder.new
       @completion = nil # required for observe (extract/consolidate); nil until configured
       @default_limit = 5
+      @recall_min_similarity = nil # opt-in cosine floor, before importance/recency ranking
+      @injection_max_bytes = nil # cap the complete appended memory block, not the host prompt
       @consolidator = :heuristic # :heuristic (deterministic) or :llm (LLM-as-judge)
       @extraction_min_confidence = 0.5
       @processed_turns = Adapters::InMemoryProcessedTurns.new # idempotency for observe

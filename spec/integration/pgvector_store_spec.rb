@@ -54,6 +54,26 @@ if deps_available
 
     before { Engram::MemoryRecord.delete_all }
 
+    it "applies bounded, thresholded recall through the production adapter" do
+      store.add(rec("relevant preference", embedding: [1.0, 0.0, 0.0], kind: :preference))
+      store.add(rec("unrelated preference", embedding: [0.0, 1.0, 0.0], kind: :preference))
+      store.add(rec("other tenant", embedding: [1.0, 0.0, 0.0], scope: "u:2", kind: :preference))
+      store.add(rec("relevant fact", embedding: [1.0, 0.0, 0.0]))
+      embedder = Object.new
+      def embedder.embed(_text)
+        [1.0, 0.0, 0.0]
+      end
+      memory = Engram::Memory.new(scope: "u:1", store: store, embedder: embedder)
+
+      records = memory.recall("q", kinds: [:preference], min_similarity: 0.5)
+      expect(records.map(&:content)).to eq(["relevant preference"])
+      prompt = memory.inject_into("P", query: "q", kinds: [:preference], min_similarity: 0.5, max_bytes: 200)
+      expect(prompt).to include("relevant preference")
+      expect(prompt).not_to include("unrelated preference", "other tenant", "relevant fact")
+      expect(prompt.bytesize - 1).to be <= 200
+      expect(memory.inject_into("P", query: "q", max_bytes: 1)).to eq("P")
+    end
+
     def rec(content, embedding:, scope: "u:1", kind: :fact, metadata: {})
       Engram::Record.new(
         content: content,

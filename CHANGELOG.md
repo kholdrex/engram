@@ -5,6 +5,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- Optional `min_similarity:` on recall, injection, and `Engram.with_memory`, with
+  `config.recall_min_similarity` as the facade default. Filters cosine similarity before
+  importance/recency ranking and touching; nil preserves existing top-k behavior.
+- Optional `max_bytes:` on injection and `Engram.with_memory`, with
+  `config.injection_max_bytes` as the default. Includes the complete appended memory block,
+  skips whole memories that do not fit, and preserves the original prompt.
+- Metrics for filtered candidates, injected/skipped memories, and appended bytes.
+- `MIN_SIMILARITY` eval control and negative-query false-positive/abstention measurements.
+
+### Fixed
+- Forward RubyLLM streaming blocks and retain the memory wrapper when fluent chat methods
+  return the underlying chat, so chained configuration does not bypass memory injection.
+
+### Changed
+- Recall rejects negative, fractional, nil, and string limits with `ArgumentError`; use an
+  integer. A zero limit skips embedding and search. A zero injection byte budget skips recall.
+
 ## [0.6.0] - 2026-07-24
 
 ### Added

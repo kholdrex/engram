@@ -30,7 +30,8 @@ module Engram
     end
 
     # Return the most relevant memories for a query.
-    def recall(query, limit: Engram.config.default_limit, kinds: nil)
+    def recall(query, limit: Engram.config.default_limit, kinds: nil,
+      min_similarity: Engram.config.recall_min_similarity)
       UseCases::Recall.new(
         store: @store,
         embedder: @embedder,
@@ -38,13 +39,15 @@ module Engram
         recency_weight: Engram.config.recency_weight,
         recency_halflife: Engram.config.recency_halflife,
         touch: Engram.config.touch_on_recall
-      ).call(query, scope: scope, limit: limit, kinds: kinds)
+      ).call(query, scope: scope, limit: limit, kinds: kinds, min_similarity: min_similarity)
     end
 
     # Recall, then inject into a prompt string.
-    def inject_into(prompt, query:, limit: Engram.config.default_limit, kinds: nil)
-      memories = recall(query, limit: limit, kinds: kinds)
-      UseCases::Inject.new.call(prompt: prompt, memories: memories)
+    def inject_into(prompt, query:, limit: Engram.config.default_limit, kinds: nil,
+      min_similarity: Engram.config.recall_min_similarity, max_bytes: Engram.config.injection_max_bytes)
+      UseCases::Inject.validate_max_bytes!(max_bytes)
+      memories = (max_bytes == 0) ? [] : recall(query, limit: limit, kinds: kinds, min_similarity: min_similarity)
+      UseCases::Inject.new.call(prompt: prompt, memories: memories, max_bytes: max_bytes)
     end
 
     # Derive memories from a conversation turn and consolidate them (v0.2).

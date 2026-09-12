@@ -24,17 +24,27 @@ module Engram
       end
 
       # Returns Array<Record>, most relevant first.
-      def call(query, scope:, limit: Engram.config.default_limit, kinds: nil)
+      def call(query, scope:, limit: Engram.config.default_limit, kinds: nil, min_similarity: nil)
         raise ArgumentError, "query must be a non-empty string" if query.to_s.strip.empty?
+        unless limit.is_a?(Integer) && limit >= 0
+          raise ArgumentError, "limit must be a non-negative integer"
+        end
+        validate_min_similarity!(min_similarity)
 
         payload = Engram::Instrumentation.payload(
           scope: scope,
           store: @store,
           limit: limit,
           kinds: Array(kinds).map(&:to_s),
-          reranking: reranking?
+          reranking: reranking?,
+          min_similarity: min_similarity,
+          candidate_count: 0,
+          filtered_count: 0,
+          result_count: 0
         )
         Engram::Instrumentation.instrument("recall", payload) do
+          next [] if limit.zero?
+
           embedding = @embedder.embed(query)
           embedding_metadata = Engram::EmbeddingMetadata.for_embedder(@embedder, embedding: embedding)
           pool_limit = reranking? ? limit * @pool_factor : limit
@@ -47,15 +57,42 @@ module Engram
             kinds: kinds
           )
 
-          results = (reranking? ? rerank(pool, embedding) : pool).first(limit)
+          candidates = if min_similarity.nil?
+            pool
+          else
+            pool.select { |record| meets_similarity?(record.embedding, embedding, min_similarity) }
+          end
+          results = (reranking? ? rerank(candidates, embedding) : candidates).first(limit)
           touch(results, scope) if @touch
           payload[:result_count] = results.size
           payload[:candidate_count] = pool.size
+          payload[:filtered_count] = pool.size - candidates.size
           results
         end
       end
 
       private
+
+      def validate_min_similarity!(value)
+        return if value.nil?
+        return if value.is_a?(Numeric) && value.real? && value.finite? && value.between?(-1, 1)
+
+        raise ArgumentError, "min_similarity must be a finite number between -1 and 1, or nil"
+      end
+
+      def meets_similarity?(embedding, query_embedding, minimum)
+        return false unless comparable_vector?(embedding) && comparable_vector?(query_embedding)
+        return false unless embedding.length == query_embedding.length
+
+        similarity = Engram::Math.cosine_similarity(query_embedding, embedding)
+        similarity.finite? && similarity.clamp(-1.0, 1.0) >= minimum
+      end
+
+      def comparable_vector?(vector)
+        vector.is_a?(Array) && !vector.empty? &&
+          vector.all? { |value| value.is_a?(Numeric) && value.real? && value.finite? } &&
+          vector.any? { |value| !value.zero? }
+      end
 
       def reranking?
         !@importance_weight.zero? || !@recency_weight.zero?
