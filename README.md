@@ -58,6 +58,8 @@ chat.ask("Why am I being rate limited?")
 - RubyLLM embedder and completion adapters for provider-backed embeddings and extraction.
 - Canonical memory kinds: `fact`, `preference`, `instruction`, and `episodic`.
 - Typed recall filters and typed, escaped memory injection.
+- Optional cosine relevance thresholds and byte budgets for injected context.
+- RubyLLM streaming and fluent chat configuration through the memory wrapper.
 - Persistence policy that rejects obvious secrets and transient task-progress updates before storage.
 - Idempotent observation, recency/importance-aware ranking, recall touching, and stale-memory pruning.
 
@@ -223,6 +225,27 @@ class AddEngramMemoryEmbeddingIndex < ActiveRecord::Migration[8.0]
 end
 ```
 
+### Filtered vector search in production
+
+Keep the generated B-tree index on `scope`. For small per-owner memory sets, filtering by
+scope and computing exact distances can be a good fit. With a shared approximate index,
+pgvector applies filters after scanning the index, so a selective scope or `kinds:` filter
+can return fewer than `limit` memories even when enough matching rows exist.
+
+On pgvector 0.8.0+, test HNSW iterative scans on representative tenant sizes:
+
+```ruby
+Engram::MemoryRecord.transaction do
+  Engram::MemoryRecord.connection.execute("SET LOCAL hnsw.iterative_scan = strict_order")
+  current_user.memory.recall("billing preferences", limit: 5)
+end
+```
+
+`SET LOCAL` lasts for the transaction. Iterative scans still have scan limits and cost
+latency; Engram does not enable them or change database session settings automatically.
+Compare query plans, result coverage, and p95 latency before adopting an index or tuning it.
+See the [pgvector filtering documentation](https://github.com/pgvector/pgvector#filtering).
+
 ## Model/provider configuration
 
 Engram is model-provider agnostic. The core only depends on two ports:
@@ -271,6 +294,27 @@ chat = Engram.with_memory(RubyLLM.chat, memory: current_user.memory)
 chat.ask("why am I being rate limited?")
 # recall + inject happen automatically before the model sees the message
 ```
+
+Streaming blocks and ordinary provider options are forwarded to the underlying chat.
+Fluent methods that return that same chat retain the memory wrapper:
+
+```ruby
+chat = Engram.with_memory(
+  RubyLLM.chat,
+  memory: current_user.memory,
+  kinds: [:fact, :preference],
+  min_similarity: 0.5, # illustrative: calibrate with your embedder and queries
+  max_bytes: 8_000
+)
+
+response = chat.with_instructions("Keep answers concise.").ask("Which plan am I on?") do |chunk|
+  print chunk.content
+end
+```
+
+The return value remains RubyLLM's final response. Memory options belong to `with_memory`;
+request options passed to `ask` belong to RubyLLM. The wrapper captures its configured
+defaults when constructed.
 
 ## Automatic memory
 
@@ -482,6 +526,43 @@ with the old `semantic` kind value.
 
 ## Tuning and maintenance
 
+### Relevance and context budgets
+
+By default, recall returns the nearest `limit` matches even for an unrelated query. Set an
+optional cosine-similarity floor to let recall return fewer matches, including none:
+
+```ruby
+Engram.configure do |config|
+  config.recall_min_similarity = 0.5 # example only; tune against labelled queries
+  config.injection_max_bytes = 8_000
+end
+
+memory.recall("billing preferences", min_similarity: 0.6)
+memory.inject_into(prompt, query: "billing preferences", max_bytes: 4_000)
+```
+
+`min_similarity` accepts a finite number in `[-1, 1]` and filters the retrieved candidate
+pool **before** importance/recency ranking and recall touching. It is a cosine score, not
+a probability of correctness. Nil disables the floor; both new configuration defaults are
+nil for compatibility. A per-call nil overrides a configured value. Thresholds are applied
+in the Ruby use case, so custom stores do not need a new search keyword. Approximate search
+can still miss qualifying memories; the threshold does not expand or refill its candidate
+pool. Embedding compatibility errors still raise normally.
+
+`max_bytes` caps the entire **appended** memory section, including its header, escaped text,
+tags, and separators. It excludes the original prompt and chat history. Whole memories are
+considered in recall order; oversized ones are skipped and smaller later ones may fit.
+No text or XML is truncated, and if none fit, the original prompt is returned unchanged.
+This is a byte cap, not a token estimate; set the host model's context budget separately.
+When `touch_on_recall` is enabled, retrieved memories are touched even if the injection
+budget later skips them.
+
+`limit` must be a non-negative integer. `max_bytes` accepts a non-negative integer or nil
+for no cap. `limit: 0` skips embedding and search; `max_bytes: 0` on `inject_into` skips recall
+entirely. Invalid controls raise `ArgumentError` instead of relying on adapter coercion.
+
+### Observation and maintenance
+
 Observation uses a scope-and-turn claim before extraction. While a claim lease is live and
 the turn has not completed, calls for the same scope and turn raise
 `Engram::ObservationInProgressError` instead of reporting success without doing the work; a
@@ -580,6 +661,12 @@ ActiveSupport::Notifications.subscribe(/\.engram\z/) do |name, _started, _finish
 end
 ```
 
+Recall events include `candidate_count`, `filtered_count` (excluded by the similarity
+floor), `result_count`, and `min_similarity` when set. Injection events preserve
+`memory_count` as the input count and add `injected_count`, `skipped_count`,
+`injected_bytes`, and `max_bytes` when set. These distinguish retrieval abstention from
+budget pressure without logging memory content.
+
 Avoid adding memory content or raw prompts to subscriber logs; recalled content is
 user-derived and should be treated as sensitive application data.
 
@@ -592,8 +679,12 @@ user-derived and should be treated as sensitive application data.
 - Configure ActiveJob for `observe_later`; keep automatic observation off the request path.
 - Configure `Engram::Rails::CacheProcessedTurns` or another persistent processed-turns adapter for retries.
 - Review persistence policy settings and add app-specific redaction/denylist patterns.
-- Set recall limits and `kinds:` filters appropriate for your prompt budget and threat model.
+- Calibrate `recall_min_similarity` and set `injection_max_bytes`, recall limits, and `kinds:` filters.
+- Check filtered pgvector recall coverage and latency on representative tenant sizes.
 - Run the deterministic test/eval suite plus pgvector integration tests before release.
+
+See [production research and priorities](docs/production-readiness.md) for the rationale,
+remaining gaps, and evaluation plan.
 
 ## How it works
 
@@ -667,8 +758,12 @@ safe to run in CI as a smoke test.
 The harness reports recall@k over labelled relevant memories, a labelled precision
 proxy@k, near-distractor retrieval rate, contradiction-pair full recall, extraction
 structured-output parsing cases, consolidation decision cases, and a heuristic duplicate-add
-baseline. Negative queries are printed for inspection, but top-k recall currently has no
-similarity threshold, so the harness does not report a hallucination rate. Treat the default
+baseline. Set `MIN_SIMILARITY=0.5` when running either eval task to test a relevance floor;
+omit it for the existing top-k baseline. With a semantic embedder, the harness reports the
+negative-query false-positive rate (queries with no labelled relevant memory that retrieve
+anything), plus abstention counts. This measures retrieval, not generated-answer hallucinations.
+Compare positive recall and negative-query false positives together when tuning the floor.
+Treat the default
 NullEmbedder recall numbers as a mechanics check, not as a semantic retrieval benchmark.
 
 Before opening a release PR, also verify the gem package:
@@ -684,7 +779,9 @@ gem unpack engram-*.gem --target /tmp/engram-package-check
 - v0.2 (done): extract and consolidate (ADD / UPDATE / FORGET), background jobs.
 - v0.3 (done): idempotent observation, importance/recency recall, forgetting and decay.
 - v0.4 (done): memory kinds, persistence policy, typed recall filters, safer injection, and observability hooks.
-- v0.5 (in progress): embedding provenance and scoped embedding rebuild operations.
+- v0.5 (done): embedding provenance and scoped embedding rebuild operations.
+- v0.6 (done): structured provenance, source impact lookup, and grounding reports.
+- next: relevance thresholds, context budgets, and reliable streaming chat integration.
 - later: additional storage backends and larger real-provider eval benchmarks.
 
 ## License

@@ -12,14 +12,39 @@ module Engram
         @header = header
       end
 
-      # Returns a new prompt string. If there are no memories, the prompt is unchanged.
-      def call(prompt:, memories:)
-        payload = {memory_count: memories&.size.to_i}
-        Engram::Instrumentation.instrument("inject", payload) do
-          next prompt if memories.nil? || memories.empty?
+      def self.validate_max_bytes!(value)
+        return if value.nil? || (value.is_a?(Integer) && value >= 0)
 
-          block = memories.map { |memory| render_memory(memory) }.join("\n")
-          "#{prompt}\n\n#{@header}:\n<engram-memories>\n#{block}\n</engram-memories>"
+        raise ArgumentError, "max_bytes must be a non-negative integer, or nil"
+      end
+
+      # The budget includes the header, delimiters, escaping, and separators, but
+      # excludes the original prompt. Skip whole memories that do not fit.
+      def call(prompt:, memories:, max_bytes: nil)
+        self.class.validate_max_bytes!(max_bytes)
+        payload = {memory_count: memories&.size.to_i, injected_count: 0,
+                   skipped_count: memories&.size.to_i, injected_bytes: 0, max_bytes: max_bytes}.compact
+        Engram::Instrumentation.instrument("inject", payload) do
+          next prompt if memories.nil? || memories.empty? || max_bytes == 0
+
+          prefix = "\n\n#{@header}:\n<engram-memories>\n"
+          suffix = "\n</engram-memories>"
+          bytes = prefix.bytesize + suffix.bytesize
+          lines = []
+          memories.each do |memory|
+            line = render_memory(memory)
+            added_bytes = line.bytesize + (lines.empty? ? 0 : 1)
+            next if max_bytes && bytes + added_bytes > max_bytes
+
+            lines << line
+            bytes += added_bytes
+          end
+          next prompt if lines.empty?
+
+          payload[:injected_count] = lines.size
+          payload[:skipped_count] -= lines.size
+          payload[:injected_bytes] = bytes
+          "#{prompt}#{prefix}#{lines.join("\n")}#{suffix}"
         end
       end
 

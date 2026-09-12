@@ -22,6 +22,25 @@ RSpec.describe Engram::UseCases::Recall do
     expect { recall.call("  ", scope: "u:1") }.to raise_error(ArgumentError)
   end
 
+  it "does no embedding or store work for a zero limit" do
+    expect(embedder).not_to receive(:embed)
+    expect(store).not_to receive(:search)
+    expect(recall.call("q", scope: "u:1", limit: 0)).to eq([])
+  end
+
+  it "rejects invalid controls before doing provider or store work" do
+    expect(embedder).not_to receive(:embed)
+    expect(store).not_to receive(:search)
+    [-1, 1.5, "5", nil].each do |limit|
+      expect { recall.call("q", scope: "u:1", limit: limit) }
+        .to raise_error(ArgumentError, /limit/)
+    end
+    [-1.1, 1.1, Float::NAN, Float::INFINITY, "0.5", false, Complex(1, 1)].each do |minimum|
+      expect { recall.call("q", scope: "u:1", min_similarity: minimum) }
+        .to raise_error(ArgumentError, /min_similarity/)
+    end
+  end
+
   it "recalls only within scope" do
     seed("secret", scope: "u:2")
     expect(recall.call("secret", scope: "u:1", limit: 5)).to be_empty
@@ -68,7 +87,7 @@ RSpec.describe Engram::UseCases::Recall do
     end.new(Engram::Record.new(content: "legacy", scope: "u:1", embedding: embedder.embed("legacy")))
 
     results = described_class.new(store: legacy_store, embedder: embedder)
-      .call("legacy", scope: "u:1", limit: 1)
+      .call("legacy", scope: "u:1", limit: 1, min_similarity: 0.5)
 
     expect(results.map(&:content)).to eq(["legacy"])
     expect(legacy_store.received).to include(scope: "u:1", limit: 1, kinds: nil)
@@ -109,6 +128,57 @@ RSpec.describe Engram::UseCases::Recall do
       results = described_class.new(store: store, embedder: fixed_embedder)
         .call("q", scope: "u:1", limit: 2)
       expect(results.map(&:content)).to eq(["near", "far"])
+    end
+
+    it "can abstain when the nearest memories are unrelated" do
+      store_record("unrelated", embedding: [0.0, 1.0])
+      store_record("opposite", embedding: [-1.0, 0.0])
+
+      results = described_class.new(store: store, embedder: fixed_embedder)
+        .call("q", scope: "u:1", min_similarity: 0.5)
+
+      expect(results).to eq([])
+    end
+
+    it "applies the similarity floor before ranking and touching" do
+      relevant = store_record("relevant", embedding: [1.0, 0.0], importance: 0.0)
+      unrelated = store_record("unrelated but important", embedding: [0.0, 1.0], importance: 1.0)
+
+      results = described_class.new(store: store, embedder: fixed_embedder, importance_weight: 10.0, touch: true)
+        .call("q", scope: "u:1", limit: 1, min_similarity: 0.5)
+
+      expect(results).to eq([relevant])
+      expect(relevant.last_accessed_at).not_to be_nil
+      expect(unrelated.last_accessed_at).to be_nil
+    end
+
+    it "accepts inclusive thresholds including negative cosine similarities" do
+      near = store_record("near", embedding: [1.0, 0.0])
+      orthogonal = store_record("orthogonal", embedding: [0.0, 1.0])
+      far = store_record("far", embedding: [-1.0, 0.0])
+      instance = described_class.new(store: store, embedder: fixed_embedder)
+
+      expect(instance.call("q", scope: "u:1", min_similarity: 1)).to eq([near])
+      expect(instance.call("q", scope: "u:1", min_similarity: 0)).to eq([near, orthogonal])
+      expect(instance.call("q", scope: "u:1", min_similarity: -1)).to eq([near, orthogonal, far])
+    end
+
+    it "does not treat missing, invalid or zero vectors as relevant at a permissive threshold" do
+      records = [nil, [], [0.0, 0.0], [1.0], [Float::NAN, 0.0], [Float::INFINITY, 0.0], ["1", "0"]].map do |vector|
+        Engram::Record.new(content: "invalid", scope: "u:1", embedding: vector)
+      end
+      allow(store).to receive(:search).and_return(records)
+
+      expect(described_class.new(store: store, embedder: fixed_embedder)
+        .call("q", scope: "u:1", min_similarity: -1)).to eq([])
+    end
+
+    it "abstains for a zero query vector when a threshold is enabled" do
+      store_record("near", embedding: [1.0, 0.0])
+      allow(fixed_embedder).to receive(:embed).and_return([0.0, 0.0])
+
+      expect(described_class.new(store: store, embedder: fixed_embedder)
+        .call("q", scope: "u:1", min_similarity: 0)).to eq([])
     end
 
     it "promotes important memories when importance_weight is set" do

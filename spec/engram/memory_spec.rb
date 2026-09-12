@@ -98,6 +98,27 @@ RSpec.describe Engram::Memory do
     expect(out).not_to include("tariff plan is Pro")
   end
 
+  it "uses configured recall and injection controls with explicit per-call overrides" do
+    allow(embedder).to receive(:embed).and_return([1.0, 0.0])
+    stored = store.add(Engram::Record.new(content: "orthogonal", scope: "user:1", embedding: [0.0, 1.0]))
+    Engram.config.recall_min_similarity = 0.5
+    Engram.config.injection_max_bytes = 1
+
+    expect(memory.recall("q")).to eq([])
+    expect(memory.recall("q", min_similarity: nil)).to eq([stored])
+    expect(memory.inject_into("P", query: "q", min_similarity: nil)).to eq("P")
+    expect(memory.inject_into("P", query: "q", min_similarity: nil, max_bytes: nil)).to include("orthogonal")
+  end
+
+  it "validates the injection budget before embedding or searching" do
+    expect(embedder).not_to receive(:embed)
+    expect(store).not_to receive(:search)
+
+    expect { memory.inject_into("P", query: "q", max_bytes: -1) }.to raise_error(ArgumentError, /max_bytes/)
+    expect(memory.inject_into("P", query: "q", max_bytes: 0)).to eq("P")
+    expect(memory.inject_into("P", query: "q", limit: 0)).to eq("P")
+  end
+
   it "isolates memories by scope" do
     memory.add("mine")
     other = described_class.new(scope: "user:2", store: store, embedder: embedder)

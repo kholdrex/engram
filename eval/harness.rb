@@ -98,6 +98,7 @@ module Engram
 
     def run_recall(embedder)
       k = Integer(ENV.fetch("K", "3"))
+      min_similarity = ENV.key?("MIN_SIMILARITY") ? Float(ENV.fetch("MIN_SIMILARITY")) : nil
       store = Engram::Adapters::InMemoryStore.new
       Engram::EVAL_FIXTURES[:memories].each do |content|
         store.add(record(content, embedder))
@@ -105,7 +106,7 @@ module Engram
 
       recall = Engram::UseCases::Recall.new(store: store, embedder: embedder)
       rows = Engram::EVAL_FIXTURES[:recall_queries].map do |fixture|
-        results = recall.call(fixture[:query], scope: SCOPE, limit: k).map(&:content)
+        results = recall.call(fixture[:query], scope: SCOPE, limit: k, min_similarity: min_similarity).map(&:content)
         evaluate_recall_row(fixture, results)
       end
 
@@ -140,6 +141,9 @@ module Engram
         contradiction_hits: contradiction_hits,
         contradiction_count: contradictions.size,
         negative_count: negatives.size,
+        negative_abstentions: negatives.count { |row| row[:results].empty? },
+        negative_false_positives: negatives.count { |row| row[:results].any? },
+        min_similarity: min_similarity,
         semantic_metrics_available: !null_embedder
       }
 
@@ -150,6 +154,7 @@ module Engram
         puts format("  labelled precision proxy@%d: n/a (NullEmbedder, not semantic)", k)
         puts "  near-distractor retrieval rate: n/a (NullEmbedder, not semantic)"
         puts "  contradiction pair full-recall rate: n/a (NullEmbedder, not semantic)"
+        puts "  negative-query false-positive rate: n/a (NullEmbedder, not semantic)"
       else
         puts format(
           "  recall@%d: %.1f%% (%d/%d relevant memories)",
@@ -184,8 +189,15 @@ module Engram
           contradiction_hits,
           contradictions.size
         )
+        puts format(
+          "  negative-query false-positive rate: %.1f%% (%d/%d queries retrieved memories)",
+          percent(metrics[:negative_false_positives], negatives.size),
+          metrics[:negative_false_positives],
+          negatives.size
+        )
       end
-      puts format("  negative queries inspected: %d (top-k retrieval always returns rows)", negatives.size)
+      puts "  min_similarity: #{min_similarity.nil? ? "disabled" : min_similarity}"
+      puts format("  negative queries inspected: %d (%d abstentions)", negatives.size, metrics[:negative_abstentions])
       metrics
     end
 
