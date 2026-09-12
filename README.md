@@ -76,7 +76,7 @@ explicitly version-gated:
 - Core types and facade: `Engram::Memory`, `Engram::Record`, `Engram::Decision`, `Engram::PersistencePolicy`, and `Engram.with_memory`.
 - Store and adapter ports: `Engram::Ports::MemoryStore`, `Engram::Ports::Embedder`, `Engram::Ports::Completion`.
 - Rails integration points: `has_memory`, `Memory#observe_later`, and generator outputs under `engram:` rake tasks.
-- Lifecycle methods in `Engram::Memory`: `add`, `recall`, `inject_into`, `observe`, `observe_later`, `forget_stale`, `rebuild_embeddings`, and `memories_from_source`.
+- Lifecycle methods in `Engram::Memory`: `add`, `recall`, `inject_into`, `observe`, `observe_later`, `forget`, `forget_stale`, `rebuild_embeddings`, and `memories_from_source`.
 - RubyLLM adapter contract points and evaluator entrypoints (`rake eval`, `rake eval:real`).
 
 ### Backward-compatibility commitments (pre-1.0)
@@ -388,8 +388,8 @@ Engram.configure do |config|
 end
 ```
 
-Write-content filtering and transformation are not deletion authorization. `forget` still
-validates scope, target existence, candidate integrity, and provenance, but it does not run
+Write-content filtering and transformation are not deletion authorization. A consolidation
+`forget` decision still validates scope, target existence, candidate integrity, and provenance, but it does not run
 `before_persist` or the policy's `call` method; this allows secret, transient, and redacted
 memories to be removed. A custom policy can additionally control destructive decisions by
 implementing `allow_destructive?(record)` and returning exactly `true` or `false`. Policies
@@ -588,7 +588,24 @@ Engram.configure do |config|
 end
 ```
 
-Prune memories you no longer need:
+Delete a specific memory:
+
+```ruby
+record = current_user.memory.add("Prefers tea")
+current_user.memory.forget(id: record.id) # => 1
+current_user.memory.forget(id: record.id) # => 0 (already deleted)
+```
+
+`forget` deletes one record within the memory's scope and returns the affected row count.
+Missing records and IDs belonging to another scope return `0`. Pass the ID returned by
+the store; integers and non-blank strings are accepted. Arrays, ranges, and nil raise
+`ArgumentError`.
+
+This is an explicit application operation: authorize the request before calling it.
+It does not run extraction, consolidation, or persistence hooks, including `allow_destructive?`.
+Source messages and processed-turn markers are kept; a later observation can recreate the memory.
+
+Prune stale memories:
 
 ```ruby
 # Forget memories untouched for 90 days, but keep anything important
@@ -622,6 +639,7 @@ When ActiveSupport is loaded, Engram emits `ActiveSupport::Notifications` events
 main memory pipeline:
 
 - `add.engram`
+- `forget.engram`
 - `recall.engram`
 - `inject.engram`
 - `observe.engram`
@@ -656,6 +674,7 @@ end
 Recall events include `candidate_count`, `filtered_count`, `result_count`, and
 `min_similarity` when set. Injection events include the input `memory_count`,
 `injected_count`, `skipped_count`, `injected_bytes`, and `max_bytes` when set.
+`forget.engram` reports `deleted_count` without the record ID or content.
 
 Avoid adding memory content or raw prompts to subscriber logs; recalled content is
 user-derived and should be treated as sensitive application data.

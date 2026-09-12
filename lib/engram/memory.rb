@@ -89,6 +89,18 @@ module Engram
       @store.all(scope: scope)
     end
 
+    # Delete one memory in this scope. Returns 1 when deleted, or 0 when missing.
+    # Explicit deletion bypasses extraction, consolidation, and persistence hooks.
+    def forget(id:)
+      valid_id = id.instance_of?(Integer) || (id.instance_of?(String) && id.valid_encoding? && !id.strip.empty?)
+      raise ArgumentError, "id must be an Integer or a non-empty String" unless valid_id
+
+      payload = Engram::Instrumentation.payload(scope: scope, store: @store)
+      Engram::Instrumentation.instrument("forget", payload) do
+        payload[:deleted_count] = @store.delete(scope: scope, id: id)
+      end
+    end
+
     # Recompute embeddings (and embedding metadata) for memories in the scope.
     # When `stale_only` is true, only records whose current metadata does not match the
     # active embedder are rebuilt.
