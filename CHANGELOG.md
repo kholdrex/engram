@@ -12,9 +12,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Optional `max_bytes:` on injection and `Engram.with_memory`, with
   `config.injection_max_bytes` as the default. Includes the complete appended memory block,
   skips whole memories that do not fit, and preserves the original prompt.
-- Content-free metrics for threshold exclusions, injected/skipped counts, and appended bytes.
+- Metrics for filtered candidates, injected/skipped memories, and appended bytes.
 - `MIN_SIMILARITY` eval control and negative-query false-positive/abstention measurements.
-- Production guidance for filtered pgvector search and threshold calibration.
 
 ### Fixed
 - Forward RubyLLM streaming blocks and retain the memory wrapper when fluent chat methods
@@ -23,8 +22,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Changed
 - Recall rejects negative, fractional, nil, and string limits with `ArgumentError`; use an
   integer. A zero limit skips embedding and search. A zero injection byte budget skips recall.
-- New thresholds and byte budgets are opt-in; existing recall and prompt output are unchanged
-  when they are omitted. Threshold filtering does not change the custom store search contract.
 
 ## [0.6.0] - 2026-07-24
 

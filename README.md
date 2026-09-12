@@ -225,14 +225,13 @@ class AddEngramMemoryEmbeddingIndex < ActiveRecord::Migration[8.0]
 end
 ```
 
-### Filtered vector search in production
+### Filtered vector search
 
-Keep the generated B-tree index on `scope`. For small per-owner memory sets, filtering by
-scope and computing exact distances can be a good fit. With a shared approximate index,
-pgvector applies filters after scanning the index, so a selective scope or `kinds:` filter
-can return fewer than `limit` memories even when enough matching rows exist.
+Keep the generated B-tree index on `scope`. With an approximate vector index, pgvector
+applies scope and kind filters after the index scan. This can return fewer than `limit`
+memories even when enough matching rows exist.
 
-On pgvector 0.8.0+, test HNSW iterative scans on representative tenant sizes:
+On pgvector 0.8.0+, HNSW iterative scans can search further:
 
 ```ruby
 Engram::MemoryRecord.transaction do
@@ -241,10 +240,9 @@ Engram::MemoryRecord.transaction do
 end
 ```
 
-`SET LOCAL` lasts for the transaction. Iterative scans still have scan limits and cost
-latency; Engram does not enable them or change database session settings automatically.
-Compare query plans, result coverage, and p95 latency before adopting an index or tuning it.
-See the [pgvector filtering documentation](https://github.com/pgvector/pgvector#filtering).
+The setting lasts for the transaction. Iterative scans add latency and still have scan
+limits. Compare them with exact search on your scoped data before enabling them.
+See [pgvector's filtering docs](https://github.com/pgvector/pgvector#filtering).
 
 ## Model/provider configuration
 
@@ -295,15 +293,14 @@ chat.ask("why am I being rate limited?")
 # recall + inject happen automatically before the model sees the message
 ```
 
-Streaming blocks and ordinary provider options are forwarded to the underlying chat.
-Fluent methods that return that same chat retain the memory wrapper:
+Streaming and chained chat configuration work through the wrapper:
 
 ```ruby
 chat = Engram.with_memory(
   RubyLLM.chat,
   memory: current_user.memory,
   kinds: [:fact, :preference],
-  min_similarity: 0.5, # illustrative: calibrate with your embedder and queries
+  min_similarity: 0.5, # tune for your embedding model
   max_bytes: 8_000
 )
 
@@ -312,9 +309,8 @@ response = chat.with_instructions("Keep answers concise.").ask("Which plan am I 
 end
 ```
 
-The return value remains RubyLLM's final response. Memory options belong to `with_memory`;
-request options passed to `ask` belong to RubyLLM. The wrapper captures its configured
-defaults when constructed.
+`ask` forwards request options and the streaming block to RubyLLM and returns its final
+response. `with_memory` captures memory defaults when the wrapper is created.
 
 ## Automatic memory
 
@@ -526,14 +522,14 @@ with the old `semantic` kind value.
 
 ## Tuning and maintenance
 
-### Relevance and context budgets
+### Recall thresholds and injection limits
 
-By default, recall returns the nearest `limit` matches even for an unrelated query. Set an
-optional cosine-similarity floor to let recall return fewer matches, including none:
+Recall returns the nearest matches even for unrelated queries. Set a minimum cosine
+similarity to exclude weak matches and a byte limit to keep injected context small:
 
 ```ruby
 Engram.configure do |config|
-  config.recall_min_similarity = 0.5 # example only; tune against labelled queries
+  config.recall_min_similarity = 0.5 # tune for your embedding model
   config.injection_max_bytes = 8_000
 end
 
@@ -541,25 +537,21 @@ memory.recall("billing preferences", min_similarity: 0.6)
 memory.inject_into(prompt, query: "billing preferences", max_bytes: 4_000)
 ```
 
-`min_similarity` accepts a finite number in `[-1, 1]` and filters the retrieved candidate
-pool **before** importance/recency ranking and recall touching. It is a cosine score, not
-a probability of correctness. Nil disables the floor; both new configuration defaults are
-nil for compatibility. A per-call nil overrides a configured value. Thresholds are applied
-in the Ruby use case, so custom stores do not need a new search keyword. Approximate search
-can still miss qualifying memories; the threshold does not expand or refill its candidate
-pool. Embedding compatibility errors still raise normally.
+`min_similarity` accepts a finite number in `[-1, 1]`. It filters candidates before
+importance/recency ranking and touching, and can return no matches. Filtering happens in
+Ruby; custom stores keep their existing search signature. It does not refill the candidate
+pool or suppress embedding compatibility errors.
 
-`max_bytes` caps the entire **appended** memory section, including its header, escaped text,
-tags, and separators. It excludes the original prompt and chat history. Whole memories are
-considered in recall order; oversized ones are skipped and smaller later ones may fit.
-No text or XML is truncated, and if none fit, the original prompt is returned unchanged.
-This is a byte cap, not a token estimate; set the host model's context budget separately.
-When `touch_on_recall` is enabled, retrieved memories are touched even if the injection
-budget later skips them.
+`max_bytes` limits the appended memory section, including escaped text, headers, and tags.
+It excludes the original prompt and chat history and counts bytes, not tokens. Memories
+are considered in recall order; those that do not fit are skipped without truncation.
+If none fit, the prompt is unchanged. With `touch_on_recall`, retrieved memories are touched
+even if the byte limit later excludes them.
 
-`limit` must be a non-negative integer. `max_bytes` accepts a non-negative integer or nil
-for no cap. `limit: 0` skips embedding and search; `max_bytes: 0` on `inject_into` skips recall
-entirely. Invalid controls raise `ArgumentError` instead of relying on adapter coercion.
+Both settings default to nil. Pass nil explicitly to override a configured value.
+`limit` and `max_bytes` require non-negative integers, except that `max_bytes: nil` removes
+the cap. `limit: 0` skips embedding and search; `max_bytes: 0` skips recall during injection.
+Invalid values raise `ArgumentError`.
 
 ### Observation and maintenance
 
@@ -661,11 +653,9 @@ ActiveSupport::Notifications.subscribe(/\.engram\z/) do |name, _started, _finish
 end
 ```
 
-Recall events include `candidate_count`, `filtered_count` (excluded by the similarity
-floor), `result_count`, and `min_similarity` when set. Injection events preserve
-`memory_count` as the input count and add `injected_count`, `skipped_count`,
-`injected_bytes`, and `max_bytes` when set. These distinguish retrieval abstention from
-budget pressure without logging memory content.
+Recall events include `candidate_count`, `filtered_count`, `result_count`, and
+`min_similarity` when set. Injection events include the input `memory_count`,
+`injected_count`, `skipped_count`, `injected_bytes`, and `max_bytes` when set.
 
 Avoid adding memory content or raw prompts to subscriber logs; recalled content is
 user-derived and should be treated as sensitive application data.
@@ -682,9 +672,6 @@ user-derived and should be treated as sensitive application data.
 - Calibrate `recall_min_similarity` and set `injection_max_bytes`, recall limits, and `kinds:` filters.
 - Check filtered pgvector recall coverage and latency on representative tenant sizes.
 - Run the deterministic test/eval suite plus pgvector integration tests before release.
-
-See [production research and priorities](docs/production-readiness.md) for the rationale,
-remaining gaps, and evaluation plan.
 
 ## How it works
 
@@ -758,13 +745,10 @@ safe to run in CI as a smoke test.
 The harness reports recall@k over labelled relevant memories, a labelled precision
 proxy@k, near-distractor retrieval rate, contradiction-pair full recall, extraction
 structured-output parsing cases, consolidation decision cases, and a heuristic duplicate-add
-baseline. Set `MIN_SIMILARITY=0.5` when running either eval task to test a relevance floor;
-omit it for the existing top-k baseline. With a semantic embedder, the harness reports the
-negative-query false-positive rate (queries with no labelled relevant memory that retrieve
-anything), plus abstention counts. This measures retrieval, not generated-answer hallucinations.
-Compare positive recall and negative-query false positives together when tuning the floor.
-Treat the default
-NullEmbedder recall numbers as a mechanics check, not as a semantic retrieval benchmark.
+baseline. Set `MIN_SIMILARITY=0.5` on either eval task to test a threshold. With a semantic
+embedder, it also reports how often unrelated queries retrieve memories and how often
+recall returns nothing. Compare these against positive-query recall when tuning the
+threshold. NullEmbedder results only check mechanics; they do not measure semantic quality.
 
 Before opening a release PR, also verify the gem package:
 
@@ -781,7 +765,7 @@ gem unpack engram-*.gem --target /tmp/engram-package-check
 - v0.4 (done): memory kinds, persistence policy, typed recall filters, safer injection, and observability hooks.
 - v0.5 (done): embedding provenance and scoped embedding rebuild operations.
 - v0.6 (done): structured provenance, source impact lookup, and grounding reports.
-- next: relevance thresholds, context budgets, and reliable streaming chat integration.
+- next: recall thresholds, injection limits, and RubyLLM streaming fixes.
 - later: additional storage backends and larger real-provider eval benchmarks.
 
 ## License

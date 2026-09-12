@@ -10,7 +10,7 @@ Engram.configure do |config|
   # How many memories to recall by default.
   config.default_limit = 5
 
-  # Optional production controls. Calibrate the cosine floor with your own queries.
+  # Minimum cosine similarity. Tune for your embedding model.
   # config.recall_min_similarity = 0.5
   # Cap the appended memory block in bytes, including escaped text and delimiters.
   # config.injection_max_bytes = 8_000
