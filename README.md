@@ -784,7 +784,7 @@ gem unpack engram-*.gem --target /tmp/engram-package-check
 - v0.4 (done): memory kinds, persistence policy, typed recall filters, safer injection, and observability hooks.
 - v0.5 (done): embedding provenance and scoped embedding rebuild operations.
 - v0.6 (done): structured provenance, source impact lookup, and grounding reports.
-- next: recall thresholds, injection limits, and RubyLLM streaming fixes.
+- v0.7 (done): recall thresholds, injection limits, scoped deletion, and RubyLLM streaming fixes.
 - later: additional storage backends and larger real-provider eval benchmarks.
 
 ## License
