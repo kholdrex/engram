@@ -15,9 +15,7 @@ module Engram
     end
 
     initializer "engram.active_job" do
-      ActiveSupport.on_load(:active_job) do
-        require "engram/rails/observe_job"
-      end
+      Engram.autoload :ObserveJob, "engram/rails/observe_job" if defined?(::ActiveJob::Base)
     end
 
     rake_tasks do

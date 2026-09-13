@@ -19,6 +19,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `MIN_SIMILARITY` eval control and negative-query false-positive/abstention measurements.
 
 ### Fixed
+- Load `ObserveJob` on first use so `observe_later` works before another job has loaded
+  `ActiveJob::Base` in a Rails application.
 - Forward RubyLLM streaming blocks and retain the memory wrapper when fluent chat methods
   return the underlying chat, so chained configuration does not bypass memory injection.
 

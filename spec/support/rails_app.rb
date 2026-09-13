@@ -34,10 +34,8 @@ end
 Rails.application.initialize! unless Rails.application.initialized?
 
 # establish_connection loads ActiveRecord::Base, firing the Railtie's on_load(:active_record)
-# hook that extends `has_memory` onto models. Reading the ActiveJob adapter does the same for
-# on_load(:active_job), which is what defines Engram::ObserveJob.
+# hook that extends `has_memory` onto models.
 ActiveRecord::Base.establish_connection(ENV.fetch("DATABASE_URL"))
-ActiveJob::Base.queue_adapter
 
 class ApplicationRecord < ActiveRecord::Base
   self.abstract_class = true
