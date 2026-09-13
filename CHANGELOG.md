@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- `Memory#forget(id:)` deletes one memory in the current scope, returning `1` when deleted
+  or `0` when missing. Explicit deletion bypasses persistence hooks and emits `forget.engram`
+  with the deleted count. Arrays, ranges, nil, and blank IDs are rejected.
 - Optional `min_similarity:` on recall, injection, and `Engram.with_memory`, with
   `config.recall_min_similarity` as the facade default. Filters cosine similarity before
   importance/recency ranking and touching; nil preserves existing top-k behavior.

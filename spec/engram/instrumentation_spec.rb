@@ -118,6 +118,22 @@ RSpec.describe "Engram instrumentation" do
     )
   end
 
+  it "reports deletion counts without record ids, content, or raw scope" do
+    Engram.config.instrumentation_scope_identifier = nil
+    record = store.add(Engram::Record.new(content: "private memory", scope: "private scope"))
+    memory = Engram::Memory.new(scope: "private scope", store: store, embedder: embedder)
+
+    memory.forget(id: record.id)
+    memory.forget(id: record.id)
+
+    expect(events.map(&:first)).to eq(["forget.engram", "forget.engram"])
+    expect(events.map { |_, payload| payload[:deleted_count] }).to eq([1, 0])
+    events.each do |_, payload|
+      expect(payload.keys).to contain_exactly(:store_adapter, :deleted_count, :duration_ms)
+      expect(payload[:store_adapter]).to eq("Engram::Adapters::InMemoryStore")
+    end
+  end
+
   it "reports threshold exclusions without content or vector data" do
     allow(embedder).to receive(:embed).and_return([1.0, 0.0])
     store.add(Engram::Record.new(content: "private memory", scope: "u:1", embedding: [0.0, 1.0]))

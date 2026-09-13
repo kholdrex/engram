@@ -180,6 +180,86 @@ RSpec.describe Engram::Memory do
     expect(memory.all).to be_empty
   end
 
+  describe "#forget" do
+    it "deletes one memory and stops recalling it" do
+      deleted = memory.add("prefers tea")
+      kept = memory.add("prefers short answers")
+
+      expect(memory.forget(id: deleted.id)).to eq(1)
+      expect(memory.all).to eq([kept])
+      expect(memory.recall("prefers tea")).not_to include(deleted)
+    end
+
+    it "returns zero for missing memories and repeated deletions" do
+      record = memory.add("prefers tea")
+
+      expect(memory.forget(id: record.id)).to eq(1)
+      expect(memory.forget(id: record.id)).to eq(0)
+      expect(memory.forget(id: -1)).to eq(0)
+    end
+
+    it "cannot delete another owner's memory" do
+      other = described_class.new(scope: "user:10", store: store, embedder: embedder)
+      record = other.add("prefers tea")
+
+      expect(memory.forget(id: record.id)).to eq(0)
+      expect(other.all).to eq([record])
+    end
+
+    it "does not treat nil or blank scopes as wildcards" do
+      record = memory.add("prefers tea")
+
+      [nil, ""].each do |scope|
+        other = described_class.new(scope: scope, store: store, embedder: embedder)
+        expect(other.forget(id: record.id)).to eq(0)
+      end
+      expect(memory.all).to eq([record])
+    end
+
+    it "rejects non-scalar and blank ids before calling the store" do
+      expect(store).not_to receive(:delete)
+      invalid_ids = [nil, [], [1, 2], (1..2), {id: 1}, true, false, 1.0, :id, "", " \t\n", "\xFF".b.force_encoding("UTF-8")]
+
+      invalid_ids.each do |id|
+        expect { memory.forget(id: id) }.to raise_error(ArgumentError, /id/)
+      end
+    end
+
+    it "passes string ids through to custom stores without coercion" do
+      custom_store = double
+      expect(custom_store).to receive(:delete).with(scope: "user:1", id: "memory:123").and_return(1)
+
+      expect(described_class.new(scope: "user:1", store: custom_store).forget(id: "memory:123")).to eq(1)
+    end
+
+    it "deletes records even when their content and metadata would fail persistence checks" do
+      record = store.add(Engram::Record.new(
+        content: "User API key is fake-token-abcdef", scope: memory.scope,
+        metadata: {"_engram" => "legacy metadata"}
+      ))
+      policy = double
+      hook = double
+      processed_turns = double
+      Engram.config.persistence_policy = policy
+      Engram.config.before_persist = hook
+      Engram.config.processed_turns = processed_turns
+      expect(policy).not_to receive(:call)
+      expect(policy).not_to receive(:allow_destructive?)
+      expect(hook).not_to receive(:call)
+      expect(embedder).not_to receive(:embed)
+      expect(store).not_to receive(:all)
+      expect(store).not_to receive(:search)
+
+      expect(memory.forget(id: record.id)).to eq(1)
+    end
+
+    it "propagates a store failure" do
+      allow(store).to receive(:delete).and_raise(Engram::Error, "store unavailable")
+
+      expect { memory.forget(id: 1) }.to raise_error(Engram::Error, "store unavailable")
+    end
+  end
+
   it "rebuilds embeddings through the Memory facade" do
     store.add(Engram::Record.new(content: "legacy", scope: "user:1", embedding: embedder.embed("legacy")))
 

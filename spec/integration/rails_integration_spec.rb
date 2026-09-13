@@ -93,6 +93,29 @@ if deps_available
       expect(bob.memory.all).to be_empty
     end
 
+    it "deletes a memory through has_memory without crossing owner scopes" do
+      ada = User.create!(name: "Ada")
+      bob = User.create!(name: "Bob")
+      record = ada.memory.add("prefers tea")
+      kept = ada.memory.add("prefers short answers")
+
+      expect(bob.memory.forget(id: record.id)).to eq(0)
+      expect(ada.memory.forget(id: record.id)).to eq(1)
+      expect(ada.memory.forget(id: record.id)).to eq(0)
+      expect(ada.memory.all.map(&:id)).to eq([kept.id])
+      expect(ada.memory.recall("prefers tea").map(&:id)).not_to include(record.id)
+    end
+
+    it "rejects bulk ids before they can reach an Active Record delete" do
+      user = User.create!(name: "Ada")
+      records = [user.memory.add("prefers tea"), user.memory.add("prefers short answers")]
+
+      [records.map(&:id), (records.first.id..records.last.id), nil].each do |id|
+        expect { user.memory.forget(id: id) }.to raise_error(ArgumentError, /id/)
+      end
+      expect(user.memory.all.map(&:id)).to eq(records.map(&:id))
+    end
+
     it "observes a turn off the request path via ObserveJob" do
       Engram.config.completion = Engram::Adapters::FakeCompletion.new(responses: [
         {"facts" => [{"content" => "User likes tea", "confidence" => 0.9}]}
