@@ -5,6 +5,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-09-13
+
 ### Added
 - `Memory#forget(id:)` deletes one memory in the current scope, returning `1` when deleted
   or `0` when missing. Explicit deletion bypasses persistence hooks and emits `forget.engram`
