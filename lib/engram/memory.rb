@@ -14,18 +14,17 @@ module Engram
 
     # Persist a memory record of the given kind. Returns nil when the configured
     # persistence policy rejects the record.
-    def add(content, kind: :fact, importance: 1.0, metadata: {})
+    def add(content, kind: :fact, importance: 1.0, metadata: {}, expires_at: nil)
       Engram::Instrumentation.instrument("add", Engram::Instrumentation.payload(scope: scope, store: @store, kind: kind)) do
-        embedding = @embedder.embed(content)
         record = Record.new(
           content: content,
           scope: scope,
-          embedding: embedding,
           kind: kind,
           importance: importance,
-          metadata: metadata
+          metadata: metadata,
+          expires_at: expires_at
         )
-        persist(record)
+        persist(record.with(embedding: @embedder.embed(content)))
       end
     end
 

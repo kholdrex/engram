@@ -23,10 +23,11 @@ module Engram
       def search(embedding:, scope:, limit:, kinds: nil, embedding_metadata: nil)
         Engram::EmbeddingMetadata.validate_query!(embedding, embedding_metadata)
         allowed_kinds = normalize_kinds(kinds)
+        now = Time.now
 
         results = @records
           .values
-          .select { |r| searchable?(r, scope, allowed_kinds) }
+          .select { |r| searchable?(r, scope, allowed_kinds) && !r.expired?(at: now) }
           .map { |r| [r, Engram::Math.cosine_similarity(embedding, r.embedding)] }
           .sort_by { |(_, score)| -score }
           .first(limit)

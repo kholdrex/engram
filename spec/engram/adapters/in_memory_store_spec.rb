@@ -26,6 +26,28 @@ RSpec.describe Engram::Adapters::InMemoryStore do
     expect(store.all(scope: "u:1")).to contain_exactly(r)
   end
 
+  it "excludes expired matches before ranking and limiting, but keeps them available for inspection" do
+    now = Time.utc(2026, 9, 15, 12)
+    allow(Time).to receive(:now).and_return(now)
+    expired = store.add(rec("expired", scope: "u:1", embedding: [1.0, 0.0]).with(expires_at: now))
+    future = store.add(rec("future", scope: "u:1", embedding: [0.9, 0.1]).with(expires_at: now + 1))
+    permanent = store.add(rec("permanent", scope: "u:1", embedding: [0.8, 0.2]))
+    store.add(rec("other tenant", scope: "u:2", embedding: [1.0, 0.0]))
+
+    expect(store.search(embedding: [1.0, 0.0], scope: "u:1", limit: 1)).to eq([future])
+    expect(store.all(scope: "u:1")).to eq([expired, future, permanent])
+    allow(Time).to receive(:now).and_return(now + 1)
+    expect(store.search(embedding: [1.0, 0.0], scope: "u:1", limit: 1)).to eq([permanent])
+  end
+
+  it "replaces expiry on update, including clearing it" do
+    now = Time.now
+    record = store.add(rec("trial", scope: "u:1", embedding: [1.0, 0.0]).with(expires_at: now - 1))
+    store.update(scope: "u:1", id: record.id, record: record.with(expires_at: nil))
+
+    expect(store.search(embedding: [1.0, 0.0], scope: "u:1", limit: 1).first.expires_at).to be_nil
+  end
+
   it "scopes search to the owner" do
     store.add(rec("mine", scope: "u:1", embedding: [1.0, 0.0]))
     store.add(rec("theirs", scope: "u:2", embedding: [1.0, 0.0]))

@@ -36,6 +36,7 @@ if deps_available
         t.jsonb :metadata, null: false, default: {}
         t.column :embedding, "vector(3)"
         t.datetime :last_accessed_at
+        t.datetime :expires_at
         t.timestamps
       end
 
@@ -46,6 +47,7 @@ if deps_available
         end
         Engram.const_set(:MemoryRecord, model)
       end
+      Engram::MemoryRecord.reset_column_information
     end
 
     after(:all) do
@@ -53,6 +55,42 @@ if deps_available
     end
 
     before { Engram::MemoryRecord.delete_all }
+
+    it "filters expiry in SQL before the limit and retains expired rows for inspection" do
+      now = Time.utc(2026, 9, 15, 12)
+      allow(Time).to receive(:now).and_return(now)
+      expired = store.add(rec("expired", embedding: [1.0, 0.0, 0.0]).with(expires_at: now))
+      future = store.add(rec("future", embedding: [0.9, 0.1, 0.0]).with(expires_at: now + 1))
+      permanent = store.add(rec("permanent", embedding: [0.8, 0.2, 0.0]))
+      store.add(rec("other tenant", embedding: [1.0, 0.0, 0.0], scope: "u:2"))
+
+      expect(store.search(embedding: [1.0, 0.0, 0.0], scope: "u:1", limit: 1).map(&:id)).to eq([future.id])
+      expect(store.all(scope: "u:1").map(&:id)).to eq([expired.id, future.id, permanent.id])
+      expect(store.all(scope: "u:1").first.expires_at).to eq(now)
+      allow(Time).to receive(:now).and_return(now + 1)
+      expect(store.search(embedding: [1.0, 0.0, 0.0], scope: "u:1", limit: 1).map(&:id)).to eq([permanent.id])
+    end
+
+    it "persists changes to expiry without modifying another tenant's memory" do
+      record = store.add(rec("trial", embedding: [1.0, 0.0, 0.0]).with(expires_at: Time.now - 1))
+      expect { store.update(scope: "u:2", id: record.id, record: record.with(scope: "u:2", expires_at: nil)) }
+        .to raise_error(Engram::Error, /no memory/)
+      expect(store.all(scope: "u:1").first).to be_expired
+
+      updated = store.update(scope: "u:1", id: record.id, record: record.with(expires_at: nil))
+      expect(updated.expires_at).to be_nil
+      expect(store.search(embedding: [1.0, 0.0, 0.0], scope: "u:1", limit: 1).map(&:id)).to eq([record.id])
+    end
+
+    it "accepts Rails time-zone deadlines through the public facade" do
+      deadline = ActiveSupport::TimeZone["Kyiv"].local(2030, 1, 1, 12)
+      memory = Engram::Memory.new(scope: "u:1", store: store,
+        embedder: Engram::Adapters::NullEmbedder.new(dimensions: 3))
+      stored = memory.add("trial", expires_at: deadline)
+
+      expect(stored.expires_at).to eq(deadline.utc)
+      expect(memory.recall("trial").map(&:id)).to eq([stored.id])
+    end
 
     it "applies bounded, thresholded recall through the production adapter" do
       store.add(rec("relevant preference", embedding: [1.0, 0.0, 0.0], kind: :preference))

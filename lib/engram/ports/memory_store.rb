@@ -12,12 +12,13 @@ module Engram
 
       # Return up to `limit` Records in `scope` nearest to `embedding`,
       # ordered most-relevant first. When `kinds` is provided, only records with
-      # those canonical memory kinds are eligible.
+      # those canonical memory kinds are eligible. Exclude expired records before
+      # ordering and limiting; expires_at <= Time.now is expired, nil never expires.
       def search(embedding:, scope:, limit:, kinds: nil, embedding_metadata: nil)
         raise NotImplementedError, "#{self.class} must implement #search"
       end
 
-      # All Records for a scope (mostly for inspection/tests).
+      # All Records for a scope, including expired records (inspection/maintenance).
       # Supports optional `limit` and `offset` for batching large sweeps.
       # Returned records are sorted in stable `id` order when batching is used.
       # Use `after_id` for keyset pagination.

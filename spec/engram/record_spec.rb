@@ -16,6 +16,34 @@ RSpec.describe Engram::Record do
     expect(record.kind).to eq(:fact)
   end
 
+  it "expires at the inclusive deadline and keeps nil expiry permanent" do
+    deadline = Time.utc(2026, 9, 15, 12)
+    record = described_class.new(content: "Trial active", scope: "user:1", expires_at: deadline)
+
+    expect(record.expired?(at: deadline - 0.001)).to be(false)
+    expect(record.expired?(at: deadline)).to be(true)
+    expect(record.expired?(at: deadline + 1)).to be(true)
+    expect(record.with(expires_at: nil).expired?(at: deadline + 1)).to be(false)
+    expect(record.with(content: "Trial extended").expires_at).to eq(deadline)
+  end
+
+  it "normalizes expiry to UTC without changing the caller's timestamp" do
+    deadline = Time.new(2026, 9, 15, 15, 0, 0, "+03:00")
+    record = described_class.new(content: "Trial", scope: "user:1", expires_at: deadline)
+
+    expect(record.expires_at).to eq(Time.utc(2026, 9, 15, 12))
+    expect(record.expires_at).to be_utc
+    expect(deadline.utc_offset).to eq(10_800)
+    expect(record.expires_at).not_to equal(deadline)
+  end
+
+  it "rejects ambiguous expiry values" do
+    ["2026-09-15", 1000, false, Float::INFINITY].each do |value|
+      expect { described_class.new(content: "Trial", scope: "user:1", expires_at: value) }
+        .to raise_error(ArgumentError, /expires_at must be a Time or nil/)
+    end
+  end
+
   it "normalizes legacy semantic kind to fact" do
     record = described_class.new(content: "User likes tea", scope: "user:1", kind: "semantic")
 

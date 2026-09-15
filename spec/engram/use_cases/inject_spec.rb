@@ -54,6 +54,17 @@ RSpec.describe Engram::UseCases::Inject do
     expect(inject.call(prompt: "Hi", memories: nil)).to eq("Hi")
   end
 
+  it "rechecks expiry when rendering previously recalled records" do
+    deadline = Time.now
+    expired = mem("old").with(expires_at: deadline)
+    current = mem("current")
+    allow(Time).to receive(:now).and_return(deadline)
+    expected = inject.call(prompt: "P", memories: [current])
+
+    expect(inject.call(prompt: "P", memories: [expired])).to eq("P")
+    expect(inject.call(prompt: "P", memories: [expired, current], max_bytes: expected.bytesize - 1)).to eq(expected)
+  end
+
   it "supports a custom header" do
     out = described_class.new(header: "# Context").call(prompt: "P", memories: [mem("x")])
     expect(out).to include("# Context:")

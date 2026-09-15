@@ -31,7 +31,10 @@ module Engram
           suffix = "\n</engram-memories>"
           bytes = prefix.bytesize + suffix.bytesize
           lines = []
+          now = Time.now
           memories.each do |memory|
+            next if memory.expired?(at: now)
+
             line = render_memory(memory)
             added_bytes = line.bytesize + (lines.empty? ? 0 : 1)
             next if max_bytes && bytes + added_bytes > max_bytes

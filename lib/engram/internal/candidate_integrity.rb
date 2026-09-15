@@ -29,7 +29,8 @@ module Engram
         kind: [Symbol],
         importance: [Integer, Float],
         created_at: [Time],
-        last_accessed_at: [NilClass, Time]
+        last_accessed_at: [NilClass, Time],
+        expires_at: [NilClass, Time]
       }.freeze
 
       Snapshot = Struct.new(:collection, :collection_state, :records)

@@ -18,6 +18,7 @@ module Engram
         validate_scope!(record.scope)
 
         row = model.create!(
+          **expiry_attributes(record),
           content: record.content,
           scope: record.scope,
           kind: record.kind.to_s,
@@ -31,6 +32,10 @@ module Engram
       def search(embedding:, scope:, limit:, kinds: nil, embedding_metadata: nil)
         Engram::EmbeddingMetadata.validate_query!(embedding, embedding_metadata)
         query = model.where(scope: scope)
+        if expiry_column?
+          expiry = model.arel_table[:expires_at]
+          query = query.where(expiry.eq(nil).or(expiry.gt(Time.now)))
+        end
         normalized_kinds = normalize_kinds(kinds)
         query = query.where(kind: normalized_kinds) if normalized_kinds
 
@@ -70,6 +75,7 @@ module Engram
         model.transaction do
           row = model.lock.find_by!(id: id, scope: scope)
           row.update!(
+            **expiry_attributes(record),
             content: record.content,
             kind: record.kind.to_s,
             importance: record.importance,
@@ -91,6 +97,17 @@ module Engram
       end
 
       private
+
+      def expiry_column?
+        model.column_names.include?("expires_at")
+      end
+
+      def expiry_attributes(record)
+        return {expires_at: record.expires_at} if expiry_column?
+        return {} if record.expires_at.nil?
+
+        raise Engram::Error, "PgvectorStore needs a nullable expires_at datetime column to store expiring memories"
+      end
 
       def validate_scope!(scope)
         raise Engram::Error, "memory scope cannot be nil" if scope.nil?
@@ -124,7 +141,8 @@ module Engram
           importance: row.importance || 1.0,
           metadata: row.metadata || {},
           created_at: row.created_at,
-          last_accessed_at: row.try(:last_accessed_at)
+          last_accessed_at: row.try(:last_accessed_at),
+          expires_at: row.try(:expires_at)
         )
       end
 

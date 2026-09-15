@@ -57,10 +57,10 @@ module Engram
             kinds: kinds
           )
 
-          candidates = if min_similarity.nil?
-            pool
-          else
-            pool.select { |record| meets_similarity?(record.embedding, embedding, min_similarity) }
+          now = Time.now
+          candidates = pool.select do |record|
+            !record.expired?(at: now) &&
+              (min_similarity.nil? || meets_similarity?(record.embedding, embedding, min_similarity))
           end
           results = (reranking? ? rerank(candidates, embedding) : candidates).first(limit)
           touch(results, scope) if @touch
