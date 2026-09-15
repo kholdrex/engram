@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "timeout"
+
 RSpec.describe Engram::Adapters::InMemoryStore do
   subject(:store) { described_class.new }
 
@@ -58,6 +60,36 @@ RSpec.describe Engram::Adapters::InMemoryStore do
     expect(store.delete_expired(scope: "u:1", ids: [expired.id, expired.id, future.id, permanent.id, other.id, -1], at: now)).to eq(1)
     expect(store.all(scope: "u:1").map(&:id)).to eq([future.id, permanent.id])
     expect(store.all(scope: "u:2").map(&:id)).to eq([other.id])
+  end
+
+  it "waits for an in-flight update before deciding whether to delete an expired memory" do
+    now = Time.now
+    record = store.add(rec("trial", scope: "u:1", embedding: [1.0, 0.0]).with(expires_at: now))
+    extended = record.with(expires_at: now + 60)
+    updating = Queue.new
+    resume = Queue.new
+    pause_update = true
+    allow(extended).to receive(:scope).and_wrap_original do |original|
+      if pause_update
+        pause_update = false
+        updating << true
+        resume.pop
+      end
+      original.call
+    end
+
+    updater = Thread.new { store.update(scope: "u:1", id: record.id, record: extended) }
+    cleaner = nil
+    Timeout.timeout(5) do
+      updating.pop
+      cleaner = Thread.new { store.delete_expired(scope: "u:1", ids: [record.id], at: now) }
+      Thread.pass while cleaner.alive? && cleaner.status != "sleep"
+      resume << true
+      updater.value
+      expect(cleaner.value).to eq(0)
+    end
+  ensure
+    [updater, cleaner].compact.each { |thread| thread.kill.join }
   end
 
   it "scopes search to the owner" do
