@@ -118,6 +118,13 @@ module Engram
         .call(scope: scope, older_than: older_than, min_importance: min_importance)
     end
 
+    # Delete expired records without loading their content or embeddings.
+    # Returns matched/deleted counts; dry runs only count eligible records.
+    def forget_expired(batch_size: 100, dry_run: false)
+      UseCases::ForgetExpired.new(store: @store)
+        .call(scope: scope, batch_size: batch_size, dry_run: dry_run)
+    end
+
     # Return the memories in this scope whose provenance references the exact host
     # source. `source_id` and `source_type` must each be non-blank Strings and are
     # matched exactly, without normalization. Source IDs are references, not an

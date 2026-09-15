@@ -48,6 +48,18 @@ RSpec.describe Engram::Adapters::InMemoryStore do
     expect(store.search(embedding: [1.0, 0.0], scope: "u:1", limit: 1).first.expires_at).to be_nil
   end
 
+  it "rechecks scope and expiry when deleting requested IDs" do
+    now = Time.now
+    expired = store.add(rec("expired", scope: "u:1", embedding: [1.0, 0.0]).with(expires_at: now))
+    future = store.add(rec("future", scope: "u:1", embedding: [1.0, 0.0]).with(expires_at: now + 1))
+    permanent = store.add(rec("permanent", scope: "u:1", embedding: [1.0, 0.0]))
+    other = store.add(rec("other", scope: "u:2", embedding: [1.0, 0.0]).with(expires_at: now))
+
+    expect(store.delete_expired(scope: "u:1", ids: [expired.id, expired.id, future.id, permanent.id, other.id, -1], at: now)).to eq(1)
+    expect(store.all(scope: "u:1").map(&:id)).to eq([future.id, permanent.id])
+    expect(store.all(scope: "u:2").map(&:id)).to eq([other.id])
+  end
+
   it "scopes search to the owner" do
     store.add(rec("mine", scope: "u:1", embedding: [1.0, 0.0]))
     store.add(rec("theirs", scope: "u:2", embedding: [1.0, 0.0]))

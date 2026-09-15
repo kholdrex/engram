@@ -96,7 +96,25 @@ module Engram
         model.where(id: id, scope: scope).update_all(last_accessed_at: at)
       end
 
+      def expired_ids(scope:, at:, limit:, after_id: nil)
+        return [] unless expiry_column?
+
+        query = expired_scope(scope, at)
+        query = query.where(model.arel_table[:id].gt(after_id)) unless after_id.nil?
+        query.order(:id).limit(limit).pluck(:id)
+      end
+
+      def delete_expired(scope:, ids:, at:)
+        return 0 if ids.empty? || !expiry_column?
+
+        expired_scope(scope, at).where(id: ids).delete_all
+      end
+
       private
+
+      def expired_scope(scope, at)
+        model.where(scope: scope).where(model.arel_table[:expires_at].lteq(at))
+      end
 
       def expiry_column?
         model.column_names.include?("expires_at")

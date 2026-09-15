@@ -73,6 +73,23 @@ module Engram
         1
       end
 
+      def expired_ids(scope:, at:, limit:, after_id: nil)
+        # IDs follow insertion order; the hash retains it across updates/deletes.
+        @records.each_value.lazy
+          .select { |record| record.scope == scope && (after_id.nil? || record.id > after_id) && record.expired?(at: at) }
+          .map(&:id).take(limit).force
+      end
+
+      def delete_expired(scope:, ids:, at:)
+        ids.uniq.count do |id|
+          record = @records[id]
+          next false unless record&.scope == scope && record.expired?(at: at)
+
+          @records.delete(id)
+          true
+        end
+      end
+
       def clear
         @records.clear
         @sequence = 0

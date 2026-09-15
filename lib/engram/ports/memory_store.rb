@@ -50,6 +50,19 @@ module Engram
         raise NotImplementedError, "#{self.class} must implement #delete"
       end
 
+      # Optional expiry maintenance: up to `limit` IDs with expires_at <= at,
+      # ordered by ID, strictly after after_id. Never includes nil expiry.
+      def expired_ids(scope:, at:, limit:, after_id: nil)
+        raise NotImplementedError, "#{self.class} does not implement #expired_ids"
+      end
+
+      # Optional expiry maintenance: delete only the requested IDs in scope that
+      # are still expired at the same cutoff. Recheck expiry atomically at deletion
+      # so a concurrent deadline extension is preserved. Returns the deleted count.
+      def delete_expired(scope:, ids:, at:)
+        raise NotImplementedError, "#{self.class} does not implement #delete_expired"
+      end
+
       # Update the last-accessed timestamp of a memory. Used by recency-aware recall.
       # Returns the number of affected rows: 1 when touched, 0 when the scoped record
       # does not exist.
