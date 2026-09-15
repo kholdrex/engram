@@ -58,6 +58,7 @@ if deps_available
       legacy = memory.add("permanent preference", metadata: {"host" => "kept"})
       before = model.find(legacy.id).attributes
       expect(memory.recall("permanent preference").map(&:id)).to eq([legacy.id])
+      expect(memory.forget_expired).to eq(matched: 0, deleted: 0, dry_run: false)
       expect { memory.add("trial", expires_at: Time.now + 60) }
         .to raise_error(Engram::Error, /expires_at datetime column/)
 
@@ -72,6 +73,8 @@ if deps_available
       allow(Time).to receive(:now).and_return(now + 1)
       expect(memory.recall("trial", limit: 1).map(&:id)).to eq([legacy.id])
       expect(model.count).to eq(2)
+      expect(memory.forget_expired).to eq(matched: 1, deleted: 1, dry_run: false)
+      expect(model.pluck(:id)).to eq([legacy.id])
 
       index = model.connection.indexes(:engram_memories)
         .find { |value| value.name == "index_engram_memories_on_scope_and_expiry" }

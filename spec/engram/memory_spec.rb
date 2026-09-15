@@ -1,6 +1,18 @@
 # frozen_string_literal: true
 
 RSpec.describe Engram::Memory do
+  it "cleans up expired memories without calling providers or persistence hooks" do
+    expired = memory.add("trial", expires_at: Time.now - 1)
+    expect(embedder).not_to receive(:embed)
+    Engram.config.before_persist = ->(_) { raise "must not run" }
+    Engram.config.persistence_policy = ->(_) { raise "must not run" }
+
+    expect(memory.forget_expired(dry_run: true)).to eq(matched: 1, deleted: 0, dry_run: true)
+    expect(memory.all.map(&:id)).to eq([expired.id])
+    expect(memory.forget_expired).to eq(matched: 1, deleted: 1, dry_run: false)
+    expect(memory.all).to eq([])
+  end
+
   it "validates expiry before embedding or persistence" do
     expect(embedder).not_to receive(:embed)
     expect(store).not_to receive(:add)

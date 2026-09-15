@@ -92,6 +92,39 @@ if deps_available
       expect(memory.recall("trial").map(&:id)).to eq([stored.id])
     end
 
+    it "cleans up expired rows in batches with a dry run and tenant isolation" do
+      now = Time.utc(2026, 9, 15, 12)
+      allow(Time).to receive(:now).and_return(now)
+      5.times { store.add(rec("expired", embedding: [1.0, 0.0, 0.0]).with(expires_at: now)) }
+      permanent = store.add(rec("permanent", embedding: [1.0, 0.0, 0.0]))
+      future = store.add(rec("future", embedding: [1.0, 0.0, 0.0]).with(expires_at: now + 1))
+      other = store.add(rec("other", embedding: [1.0, 0.0, 0.0], scope: "u:2").with(expires_at: now))
+      memory = Engram::Memory.new(scope: "u:1", store: store)
+
+      expect(store).not_to receive(:all)
+      expect(memory.forget_expired(batch_size: 2, dry_run: true)).to eq(matched: 5, deleted: 0, dry_run: true)
+      expect(Engram::MemoryRecord.count).to eq(8)
+      expect(memory.forget_expired(batch_size: 2)).to eq(matched: 5, deleted: 5, dry_run: false)
+      expect(Engram::MemoryRecord.order(:id).pluck(:id)).to eq([permanent.id, future.id, other.id])
+      expect(memory.forget_expired).to eq(matched: 0, deleted: 0, dry_run: false)
+    end
+
+    it "rechecks deadlines and scopes in the delete statement after a concurrent update" do
+      now = Time.now
+      expired = store.add(rec("expired", embedding: [1.0, 0.0, 0.0]).with(expires_at: now))
+      extended = store.add(rec("extended", embedding: [1.0, 0.0, 0.0]).with(expires_at: now))
+      cleared = store.add(rec("cleared", embedding: [1.0, 0.0, 0.0]).with(expires_at: now))
+      other = store.add(rec("other", embedding: [1.0, 0.0, 0.0], scope: "u:2").with(expires_at: now))
+      ids = store.expired_ids(scope: "u:1", at: now, limit: 10)
+      writer = Engram::Adapters::PgvectorStore.new
+      writer.update(scope: "u:1", id: extended.id, record: extended.with(expires_at: now + 60))
+      writer.update(scope: "u:1", id: cleared.id, record: cleared.with(expires_at: nil))
+
+      expect(store.delete_expired(scope: "u:1", ids: ids + [other.id], at: now)).to eq(1)
+      expect(Engram::MemoryRecord.exists?(expired.id)).to be(false)
+      expect(Engram::MemoryRecord.order(:id).pluck(:id)).to eq([extended.id, cleared.id, other.id])
+    end
+
     it "applies bounded, thresholded recall through the production adapter" do
       store.add(rec("relevant preference", embedding: [1.0, 0.0, 0.0], kind: :preference))
       store.add(rec("unrelated preference", embedding: [0.0, 1.0, 0.0], kind: :preference))

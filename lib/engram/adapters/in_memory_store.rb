@@ -10,14 +10,17 @@ module Engram
       def initialize
         @records = {}
         @sequence = 0
+        @mutex = Mutex.new
       end
 
       def add(record)
         validate_scope!(record.scope)
 
-        record.id = (@sequence += 1)
-        @records[record.id] = record
-        record
+        @mutex.synchronize do
+          record.id = (@sequence += 1)
+          @records[record.id] = record
+          record
+        end
       end
 
       def search(embedding:, scope:, limit:, kinds: nil, embedding_metadata: nil)
@@ -25,8 +28,7 @@ module Engram
         allowed_kinds = normalize_kinds(kinds)
         now = Time.now
 
-        results = @records
-          .values
+        results = @mutex.synchronize { @records.values }
           .select { |r| searchable?(r, scope, allowed_kinds) && !r.expired?(at: now) }
           .map { |r| [r, Engram::Math.cosine_similarity(embedding, r.embedding)] }
           .sort_by { |(_, score)| -score }
@@ -38,7 +40,7 @@ module Engram
       end
 
       def all(scope:, limit: nil, offset: 0, after_id: nil)
-        records = @records.values.select { |r| r.scope == scope }.sort_by { |record| record.id }
+        records = @mutex.synchronize { @records.values }.select { |r| r.scope == scope }.sort_by { |record| record.id }
         records = records.drop_while { |record| !after_id.nil? && record.id && record.id <= after_id }
         records = records.drop(offset) if offset > 0
         records = records.take(limit) if limit
@@ -46,36 +48,65 @@ module Engram
       end
 
       def existing_ids(scope:, ids:)
-        ids.uniq.select { |id| @records[id]&.scope == scope }
+        @mutex.synchronize { ids.uniq.select { |id| @records[id]&.scope == scope } }
       end
 
       def update(scope:, id:, record:)
-        existing = @records[id]
-        raise Engram::Error, "no memory with id #{id.inspect} in scope #{scope.inspect}" unless existing&.scope == scope
-        raise Engram::Error, "cannot move memory across scopes" unless record.scope == scope
+        @mutex.synchronize do
+          existing = @records[id]
+          raise Engram::Error, "no memory with id #{id.inspect} in scope #{scope.inspect}" unless existing&.scope == scope
+          raise Engram::Error, "cannot move memory across scopes" unless record.scope == scope
 
-        record.id = id
-        @records[id] = record
+          record.id = id
+          @records[id] = record
+        end
       end
 
       def delete(scope:, id:)
-        return 0 unless @records[id]&.scope == scope
+        @mutex.synchronize do
+          return 0 unless @records[id]&.scope == scope
 
-        @records.delete(id)
-        1
+          @records.delete(id)
+          1
+        end
       end
 
       def touch(scope:, id:, at: Time.now)
-        record = @records[id]
-        return 0 unless record&.scope == scope
+        @mutex.synchronize do
+          record = @records[id]
+          return 0 unless record&.scope == scope
 
-        record.last_accessed_at = at
-        1
+          record.last_accessed_at = at
+          1
+        end
+      end
+
+      def expired_ids(scope:, at:, limit:, after_id: nil)
+        # IDs follow insertion order; the hash retains it across updates/deletes.
+        @mutex.synchronize do
+          @records.each_value.lazy
+            .select { |record| record.scope == scope && (after_id.nil? || record.id > after_id) && record.expired?(at: at) }
+            .map(&:id).take(limit).force
+        end
+      end
+
+      def delete_expired(scope:, ids:, at:)
+        @mutex.synchronize do
+          ids.uniq.count do |id|
+            record = @records[id]
+            next false unless record&.scope == scope && record.expired?(at: at)
+
+            @records.delete(id)
+            true
+          end
+        end
       end
 
       def clear
-        @records.clear
-        @sequence = 0
+        @mutex.synchronize do
+          @records.clear
+          @sequence = 0
+        end
       end
 
       private
