@@ -6,17 +6,18 @@ RSpec.describe "gem packaging" do
     Dir.chdir(root) { Gem::Specification.load(File.join(root, "engram.gemspec")) }
   end
 
-  it "ships the Rails generator templates the install generator copies" do
+  it "ships the Rails generator templates" do
     templates = spec.files.grep(%r{\Alib/generators/engram/templates/.+\.tt\z})
     expect(templates).to contain_exactly(
+      "lib/generators/engram/templates/add_expiry_to_engram_memories.rb.tt",
       "lib/generators/engram/templates/create_engram_memories.rb.tt",
       "lib/generators/engram/templates/initializer.rb.tt",
       "lib/generators/engram/templates/memory_record.rb.tt"
     )
   end
 
-  it "ships the install generator itself" do
-    expect(spec.files).to include("lib/generators/engram/install_generator.rb")
+  it "ships the install and expiry generators" do
+    expect(spec.files).to include("lib/generators/engram/install_generator.rb", "lib/generators/engram/expiry_generator.rb")
   end
 
   it "ships the rake tasks the Railtie loads into host apps" do
