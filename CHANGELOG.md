@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 
 - Optional `expires_at` on memories. Expired records are excluded from search and injection while remaining available for inspection and deletion.
+- `engram:expiry` generator for existing Rails apps, with a concurrent index for scoped expiry queries.
+- Scoped `forget_expired` cleanup with batching, dry runs, and a Rails task. Deletion rechecks the deadline so concurrent expiry extensions are preserved.
 
 ## [0.7.0] - 2026-09-13
 

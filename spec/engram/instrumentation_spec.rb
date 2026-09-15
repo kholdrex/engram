@@ -118,6 +118,17 @@ RSpec.describe "Engram instrumentation" do
     )
   end
 
+  it "emits expiry cleanup counts without memory content or IDs" do
+    Engram.config.instrumentation_scope_identifier = nil
+    store.add(Engram::Record.new(content: "private trial", scope: "u:1", expires_at: Time.utc(1970, 1, 1)))
+    Engram::Memory.new(scope: "u:1", store: store).forget_expired
+
+    name, payload = events.fetch(0)
+    expect(name).to eq("forget_expired.engram")
+    expect(payload).to include(matched: 1, deleted: 1, dry_run: false)
+    expect(payload.keys).to contain_exactly(:matched, :deleted, :dry_run, :store_adapter, :duration_ms)
+  end
+
   it "reports deletion counts without record ids, content, or raw scope" do
     Engram.config.instrumentation_scope_identifier = nil
     record = store.add(Engram::Record.new(content: "private memory", scope: "private scope"))

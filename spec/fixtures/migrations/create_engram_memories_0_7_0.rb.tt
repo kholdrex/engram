@@ -12,15 +12,11 @@ class CreateEngramMemories < ActiveRecord::Migration[<%= migration_version %>]
       t.jsonb :metadata, null: false, default: {}
       t.vector :embedding, limit: <%= dimensions %>
       t.datetime :last_accessed_at
-      t.datetime :expires_at
 
       t.timestamps
     end
 
     add_index :engram_memories, :scope
-    add_index :engram_memories, [:scope, :expires_at],
-      name: "index_engram_memories_on_scope_and_expiry",
-      where: "expires_at IS NOT NULL"
 
     # For larger datasets, choose one approximate vector index after backfilling data.
     # HNSW is a strong default for read-heavy recall workloads with frequent inserts.
