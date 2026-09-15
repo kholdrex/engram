@@ -1,0 +1,12 @@
+# frozen_string_literal: true
+
+class AddExpiryToEngramMemories < ActiveRecord::Migration[<%= migration_version %>]
+  disable_ddl_transaction!
+
+  def change
+    add_column :engram_memories, :expires_at, :datetime
+    add_index :engram_memories, [:scope, :expires_at],
+      name: "index_engram_memories_on_scope_and_expiry",
+      where: "expires_at IS NOT NULL", algorithm: :concurrently
+  end
+end

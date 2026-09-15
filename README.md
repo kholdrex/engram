@@ -572,10 +572,19 @@ Custom extractors or `before_persist` can set expiry with `record.with(expires_a
 Engram does not infer deadlines from conversation text. Store updates replace expiry with
 the supplied record's value, including nil.
 
-New Rails installs include an `expires_at` column. Existing apps can add a nullable
-datetime column to `engram_memories` before using expiry. Reads and non-expiring writes
-continue to work without it; expiring writes raise an error instead of losing the deadline.
-Restart app processes after migrating so ActiveRecord refreshes its cached schema.
+New Rails installs include the expiry column and index. For a table created by 0.7.0 or
+earlier, generate and run the upgrade migration:
+
+```sh
+bin/rails generate engram:expiry
+bin/rails db:migrate
+```
+
+The migration adds a nullable datetime column and builds a partial index on scope and
+expiry concurrently. Existing rows keep their data and do not expire. Reads and
+non-expiring writes continue to work before migration; expiring writes raise an error
+instead of losing the deadline. Restart app processes after migrating so ActiveRecord
+refreshes its cached schema. If you use a custom table, adjust the generated migration.
 
 Custom stores must persist `expires_at` and exclude expired records before limiting search
 results. Recall also discards any expired records a custom store returns, but cannot fill
