@@ -36,13 +36,13 @@ if deps_available
         template_path = File.expand_path("../fixtures/migrations/create_engram_memories_0_7_0.rb.tt", __dir__)
         template = File.read(template_path)
         schema = ERB.new(template).result_with_hash(migration_version: "7.0", dimensions: 3)
-        @legacy_migration = Module.new.module_eval("#{schema}\nCreateEngramMemories", template_path, 1).new
+        @legacy_migration = Module.new.module_eval("#{schema}\nCreateEngramMemories", __FILE__, __LINE__).new
         ActiveRecord::Migration.suppress_messages { @legacy_migration.migrate(:up) }
 
         Engram::Generators::ExpiryGenerator.new([], {}, destination_root: destination).invoke_all
         files = Dir[File.join(destination, "db/migrate/*_add_expiry_to_engram_memories.rb")]
         expect(files.length).to eq(1)
-        @upgrade = Module.new.module_eval("#{File.read(files.first)}\nAddExpiryToEngramMemories", files.first, 1).new
+        @upgrade = Module.new.module_eval("#{File.read(files.first)}\nAddExpiryToEngramMemories", __FILE__, __LINE__).new
         example.run
       ensure
         ActiveRecord::Base.connection.drop_table(:engram_memories, if_exists: true)
