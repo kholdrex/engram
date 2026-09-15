@@ -1,6 +1,36 @@
 # frozen_string_literal: true
 
 RSpec.describe Engram::Memory do
+  it "validates expiry before embedding or persistence" do
+    expect(embedder).not_to receive(:embed)
+    expect(store).not_to receive(:add)
+
+    expect { memory.add("trial", expires_at: "tomorrow") }.to raise_error(ArgumentError, /expires_at/)
+  end
+
+  it "keeps expiry through persistence transformations and embedding rebuilds" do
+    deadline = Time.now + 60
+    Engram.config.before_persist = ->(record) { record.with(content: "redacted") }
+    stored = memory.add("trial", expires_at: deadline)
+    memory.rebuild_embeddings(stale_only: false)
+
+    expect(stored.content).to eq("redacted")
+    expect(memory.all.first.expires_at).to eq(deadline)
+  end
+
+  it "stops recalling and injecting expired memories without deleting them" do
+    now = Time.utc(2026, 9, 15, 12)
+    allow(Time).to receive(:now).and_return(now)
+    stored = memory.add("Trial active", expires_at: now + 1)
+    expect(memory.recall("Trial active")).to eq([stored])
+
+    allow(Time).to receive(:now).and_return(now + 1)
+    expect(memory.recall("Trial active")).to eq([])
+    expect(memory.inject_into("P", query: "Trial active")).to eq("P")
+    expect(memory.all).to eq([stored])
+    expect(memory.forget(id: stored.id)).to eq(1)
+  end
+
   subject(:memory) { described_class.new(scope: "user:1", store: store, embedder: embedder) }
 
   let(:store) { Engram::Adapters::InMemoryStore.new }

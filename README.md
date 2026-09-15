@@ -228,7 +228,7 @@ end
 ### Filtered vector search
 
 Keep the generated B-tree index on `scope`. With an approximate vector index, pgvector
-applies scope and kind filters after the index scan. This can return fewer than `limit`
+applies scope, kind, and expiry filters after the index scan. This can return fewer than `limit`
 memories even when enough matching rows exist.
 
 On pgvector 0.8.0+, HNSW iterative scans can search further:
@@ -552,6 +552,34 @@ Both settings default to nil. Pass nil explicitly to override a configured value
 `limit` and `max_bytes` require non-negative integers, except that `max_bytes: nil` removes
 the cap. `limit: 0` skips embedding and search; `max_bytes: 0` skips recall during injection.
 Invalid values raise `ArgumentError`.
+
+### Memory expiry
+
+Set a deadline for temporary memories:
+
+```ruby
+user.memory.add("Trial access is active", expires_at: 7.days.from_now)
+```
+
+`expires_at` accepts a Time (including Rails time-zone values) or nil. Nil is the default
+and never expires. A memory is expired at `expires_at <= Time.now`. Both built-in stores
+exclude expired records before the search limit, so they no longer participate in recall
+or consolidation. Injection checks expiry again when rendering.
+
+Expiry does not delete rows. `memory.all` still returns them, and `memory.forget(id:)` can
+delete them. A new observation may recreate the same fact from retained source data.
+Custom extractors or `before_persist` can set expiry with `record.with(expires_at: deadline)`;
+Engram does not infer deadlines from conversation text. Store updates replace expiry with
+the supplied record's value, including nil.
+
+New Rails installs include an `expires_at` column. Existing apps can add a nullable
+datetime column to `engram_memories` before using expiry. Reads and non-expiring writes
+continue to work without it; expiring writes raise an error instead of losing the deadline.
+Restart app processes after migrating so ActiveRecord refreshes its cached schema.
+
+Custom stores must persist `expires_at` and exclude expired records before limiting search
+results. Recall also discards any expired records a custom store returns, but cannot fill
+the gaps left by a store that filters after its limit.
 
 ### Observation and maintenance
 

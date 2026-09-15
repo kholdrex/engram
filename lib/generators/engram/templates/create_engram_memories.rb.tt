@@ -12,6 +12,7 @@ class CreateEngramMemories < ActiveRecord::Migration[<%= migration_version %>]
       t.jsonb :metadata, null: false, default: {}
       t.vector :embedding, limit: <%= dimensions %>
       t.datetime :last_accessed_at
+      t.datetime :expires_at
 
       t.timestamps
     end

@@ -20,4 +20,11 @@ RSpec.describe Engram::Consolidators::HeuristicConsolidator do
     decisions = consolidator.reconcile_all(candidates: [candidate("plan is Pro")], scope: "u:1")
     expect(decisions.map(&:action)).to eq([:noop])
   end
+
+  it "does not let an expired duplicate suppress a new observation" do
+    store.add(candidate("plan is Pro").with(expires_at: Time.now - 1))
+    decisions = consolidator.reconcile_all(candidates: [candidate("plan is Pro")], scope: "u:1")
+
+    expect(decisions.map(&:action)).to eq([:add])
+  end
 end

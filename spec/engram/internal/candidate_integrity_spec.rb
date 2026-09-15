@@ -51,6 +51,18 @@ RSpec.describe Engram::Internal::CandidateIntegrity do
     expect(integrity.verify!(candidates, snapshot)).to be_nil
   end
 
+  it "detaches expiry and rejects changes to it during consolidation" do
+    deadline = Time.now + 60
+    candidate = record(expires_at: deadline)
+    detached = integrity.detach(candidate)
+    expect(detached.expires_at).to eq(deadline)
+    expect(detached.expires_at).not_to equal(candidate.expires_at)
+
+    expect_candidate_mutation(candidate) do |value|
+      value.instance_variable_set(:@expires_at, nil)
+    end
+  end
+
   it "accepts candidate metadata at the maximum nesting depth" do
     candidate = record(metadata: {"value" => nested_arrays(described_class::MAX_NESTING_DEPTH)})
     candidates = [candidate]

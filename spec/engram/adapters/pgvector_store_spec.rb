@@ -3,11 +3,13 @@
 RSpec.describe Engram::Adapters::PgvectorStore do
   it "lets the database allocate IDs on add instead of forwarding a caller-supplied ID" do
     model = double
+    allow(model).to receive(:column_names).and_return([])
     row = double(
       id: 42, content: "new", scope: "u:1", kind: "fact", importance: 1.0,
       metadata: {}, embedding: [0.0], created_at: Time.at(0)
     )
     allow(row).to receive(:try).with(:last_accessed_at).and_return(nil)
+    allow(row).to receive(:try).with(:expires_at).and_return(nil)
     expect(model).to receive(:create!).with(
       content: "new", scope: "u:1", kind: "fact", importance: 1.0,
       metadata: {}, embedding: [0.0]
@@ -15,6 +17,15 @@ RSpec.describe Engram::Adapters::PgvectorStore do
     supplied = Engram::Record.new(id: 7, content: "new", scope: "u:1", embedding: [0.0])
 
     expect(described_class.new(model: model).add(supplied).id).to eq(42)
+  end
+
+  it "rejects expiring writes on an unmigrated schema before creating a row" do
+    model = double(column_names: ["content"])
+    expect(model).not_to receive(:create!)
+    record = Engram::Record.new(content: "trial", scope: "u:1", expires_at: Time.now + 60)
+
+    expect { described_class.new(model: model).add(record) }
+      .to raise_error(Engram::Error, /nullable expires_at datetime column/)
   end
 
   it "checks requested ids with a scoped pluck query" do

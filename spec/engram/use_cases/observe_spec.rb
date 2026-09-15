@@ -23,9 +23,10 @@ RSpec.describe Engram::UseCases::Observe do
   end
 
   it "normalizes Record and Extraction array members before consolidation" do
+    deadline = Time.now + 60
     plain = Engram::Record.new(content: "Plain", scope: "u:1", embedding: [0.0])
     wrapped_record = Engram::Record.new(content: "Grounded", scope: "u:1", embedding: [0.0],
-      metadata: {"host" => true})
+      metadata: {"host" => true}, expires_at: deadline)
     extraction = Engram::Extraction.new(record: wrapped_record, provenance: provenance)
     extractor = double(extract: [plain, extraction])
     consolidator = double
@@ -35,6 +36,7 @@ RSpec.describe Engram::UseCases::Observe do
       expect(candidates.first).to equal(plain)
       expect(Engram::Provenance.extract(candidates.last.metadata)).to eq(provenance)
       expect(candidates.last.metadata).to include("host" => true)
+      expect(candidates.last.expires_at).to eq(deadline)
       []
     end
 

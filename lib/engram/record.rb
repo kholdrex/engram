@@ -9,15 +9,18 @@ module Engram
   # `semantic` kind is normalized to `fact` for compatibility with pre-1.0 records.
   class Record
     STATE_READERS = %i[
-      id content scope embedding kind importance metadata created_at last_accessed_at
+      id content scope embedding kind importance metadata created_at last_accessed_at expires_at
     ].freeze
 
     attr_accessor :id, :last_accessed_at
     attr_reader :content, :embedding, :scope, :kind, :importance, :metadata,
-      :created_at
+      :created_at, :expires_at
 
     def initialize(content:, scope:, id: nil, embedding: nil, kind: :fact,
-      importance: 1.0, metadata: {}, created_at: nil, last_accessed_at: nil)
+      importance: 1.0, metadata: {}, created_at: nil, last_accessed_at: nil, expires_at: nil)
+      unless expires_at.nil? || expires_at.is_a?(Time)
+        raise ArgumentError, "expires_at must be a Time or nil"
+      end
       @id = id
       @content = content
       @scope = scope
@@ -27,10 +30,15 @@ module Engram
       @metadata = metadata
       @created_at = created_at || Time.now
       @last_accessed_at = last_accessed_at
+      @expires_at = expires_at&.getutc
     end
 
     def with(**attributes)
       self.class.new(**to_h.merge(attributes))
+    end
+
+    def expired?(at: Time.now)
+      !expires_at.nil? && expires_at <= at
     end
 
     # Return structured supporting-source metadata when this record carries a

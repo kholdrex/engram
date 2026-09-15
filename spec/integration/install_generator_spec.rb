@@ -48,6 +48,7 @@ if deps_available
         expect(migration_contents).to include("create_table :engram_memories")
         expect(migration_contents).to include("t.vector :embedding, limit: 1536")
         expect(migration_contents).to include('t.string :kind, null: false, default: "fact"')
+        expect(migration_contents).to include("t.datetime :expires_at")
       end
 
       it "creates the initializer pointing at the pgvector store" do

@@ -22,6 +22,20 @@ RSpec.describe Engram::UseCases::Recall do
     expect { recall.call("  ", scope: "u:1") }.to raise_error(ArgumentError)
   end
 
+  it "filters expired records from custom stores before reranking or touching" do
+    expired = seed("expired").with(expires_at: Time.now - 1, importance: 100)
+    current = seed("current")
+    allow(store).to receive(:search).and_return([expired, current])
+    allow(store).to receive(:touch).and_call_original
+    expect(store).not_to receive(:touch).with(hash_including(id: expired.id))
+
+    results = described_class.new(store: store, embedder: embedder, importance_weight: 10, touch: true)
+      .call("q", scope: "u:1", limit: 1)
+
+    expect(results).to eq([current])
+    expect(current.last_accessed_at).not_to be_nil
+  end
+
   it "does no embedding or store work for a zero limit" do
     expect(embedder).not_to receive(:embed)
     expect(store).not_to receive(:search)
