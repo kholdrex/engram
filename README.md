@@ -847,6 +847,7 @@ gem unpack engram-*.gem --target /tmp/engram-package-check
 - v0.5 (done): embedding provenance and scoped embedding rebuild operations.
 - v0.6 (done): structured provenance, source impact lookup, and grounding reports.
 - v0.7 (done): recall thresholds, injection limits, scoped deletion, and RubyLLM streaming fixes.
+- v0.8 (done): explicit memory expiry, Rails upgrade migration, and scoped cleanup with dry runs.
 - later: additional storage backends and larger real-provider eval benchmarks.
 
 ## License
