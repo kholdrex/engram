@@ -76,7 +76,7 @@ explicitly version-gated:
 - Core types and facade: `Engram::Memory`, `Engram::Record`, `Engram::Decision`, `Engram::PersistencePolicy`, and `Engram.with_memory`.
 - Store and adapter ports: `Engram::Ports::MemoryStore`, `Engram::Ports::Embedder`, `Engram::Ports::Completion`.
 - Rails integration points: `has_memory`, `Memory#observe_later`, and generator outputs under `engram:` rake tasks.
-- Lifecycle methods in `Engram::Memory`: `add`, `recall`, `inject_into`, `observe`, `observe_later`, `forget`, `forget_stale`, `forget_expired`, `rebuild_embeddings`, and `memories_from_source`.
+- Lifecycle methods in `Engram::Memory`: `add`, `update`, `recall`, `inject_into`, `observe`, `observe_later`, `forget`, `forget_stale`, `forget_expired`, `rebuild_embeddings`, and `memories_from_source`.
 - RubyLLM adapter contract points and evaluator entrypoints (`rake eval`, `rake eval:real`).
 
 ### Backward-compatibility commitments (pre-1.0)
@@ -404,6 +404,31 @@ implementing `allow_destructive?(record)` and returning exactly `true` or `false
 that only implement `call` affect writes but do not prevent deletion. The built-in policy uses
 this separate hook to retain its ungrounded-provenance protection.
 
+### Correcting memories
+
+```ruby
+memory.update(id: record.id, content: "Lives in Berlin")
+memory.update(id: record.id, importance: 0.2, expires_at: nil)
+```
+
+`update` changes only the attributes you pass (`content`, `kind`, `importance`, `metadata`,
+`expires_at`) and keeps the id, `created_at`, and `last_accessed_at`. `metadata:` replaces the
+application metadata; `{}` clears it, and the reserved `_engram` key is not accepted.
+`expires_at: nil` removes the expiry. Other attributes do not accept `nil`.
+
+The edit goes through `before_persist` and the persistence policy like a new memory, and a
+policy that implements `allow_destructive?` must also allow replacing the original record.
+Expired memories can be updated too. `update` returns the stored record, `nil` if the hook or policy rejects it (the stored memory is
+left unchanged), and raises `Engram::MemoryNotFoundError` if the id is not in this scope.
+The embedding is recomputed only when the content changes.
+
+Changing the content removes the record's provenance, because the old sources no longer
+support the new text. Other edits keep it.
+
+`update` reads the record, applies the changes, and writes it back without conflict
+detection. If `observe`, an embedding rebuild, or another `update` writes the same memory at
+the same time, one of the changes can be lost.
+
 ### Extraction provenance
 
 Custom extractors remain compatible when they return an array of plain `Engram::Record`
@@ -708,6 +733,7 @@ When ActiveSupport is loaded, Engram emits `ActiveSupport::Notifications` events
 main memory pipeline:
 
 - `add.engram`
+- `update.engram`
 - `forget.engram`
 - `forget_expired.engram`
 - `recall.engram`
