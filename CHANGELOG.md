@@ -10,8 +10,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `Memory#add` no longer sends content to the embedder before `before_persist` and the
   persistence policy run. Rejected text is not embedded, and redacted text is embedded once,
   after redaction.
-- `has_memory` raises `Engram::Error` for an unsaved owner instead of using the shared
-  `"<model>:"` scope.
+- `has_memory` raises `Engram::Error` for an owner that is not persisted (new or destroyed)
+  instead of deriving its scope from an unsaved or reused id.
 - The install generator configures the embedder with the requested `--dimensions` so the
   initializer matches the migration.
 

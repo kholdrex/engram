@@ -22,7 +22,7 @@ module Engram
             if scope_proc
               instance_exec(&scope_proc)
             else
-              if id.nil?
+              unless persisted?
                 raise Engram::Error,
                   "#{self.class.name} must be saved before using memory, or pass a scope to has_memory"
               end

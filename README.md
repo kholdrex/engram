@@ -140,8 +140,8 @@ current_user.memory.add("Works at Acme Corp", kind: :fact)
 current_user.memory.recall("where does the user work?")
 ```
 
-The default scope needs a saved record; calling `memory` on an unsaved owner raises
-`Engram::Error`. Pass `has_memory scope: -> { ... }` to use a different key.
+The default scope needs a persisted record; calling `memory` on a new or destroyed owner
+raises `Engram::Error`. Pass `has_memory scope: -> { ... }` to use a different key.
 
 Run automatic observation off the request path:
 
