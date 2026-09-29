@@ -44,6 +44,12 @@ module Engram
         options[:dimensions]
       end
 
+      def embedder_arguments
+        return "" if dimensions == DEFAULT_DIMENSIONS
+
+        "(dimensions: #{dimensions})"
+      end
+
       def validate_dimensions!
         return if dimensions.is_a?(Integer) && dimensions.positive?
 

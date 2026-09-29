@@ -5,7 +5,8 @@ Engram.configure do |config|
   config.store = Engram::Adapters::PgvectorStore.new
 
   # Generate embeddings via RubyLLM. Configure RubyLLM separately with your provider keys.
-  config.embedder = Engram::Adapters::RubyLLMEmbedder.new
+  # The embedder must return <%= dimensions %>-dimensional vectors to match the migration.
+  config.embedder = Engram::Adapters::RubyLLMEmbedder.new<%= embedder_arguments %>
 
   # How many memories to recall by default.
   config.default_limit = 5

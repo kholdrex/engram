@@ -22,6 +22,11 @@ module Engram
             if scope_proc
               instance_exec(&scope_proc)
             else
+              if id.nil?
+                raise Engram::Error,
+                  "#{self.class.name} must be saved before using memory, or pass a scope to has_memory"
+              end
+
               "#{self.class.name.underscore}:#{id}"
             end
           Engram::Memory.new(scope: key)

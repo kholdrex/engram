@@ -57,7 +57,8 @@ module Engram
       end
       record = @persistence_policy.call(record) if record && @persistence_policy
       validate_provenance!(record) if record
-      if record && record.content != original_content
+      # Embed only after hooks and policy so rejected or redacted text never reaches the embedder.
+      if record && (record.embedding.nil? || record.content != original_content)
         record = record.with(embedding: @embedder.embed(record.content))
       end
       record = Engram::EmbeddingMetadata.attach(record, embedder: @embedder) if record
