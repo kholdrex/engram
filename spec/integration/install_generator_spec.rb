@@ -54,6 +54,7 @@ if deps_available
       it "creates the initializer pointing at the pgvector store" do
         initializer = File.read(File.join(destination, "config/initializers/engram.rb"))
         expect(initializer).to include("Engram::Adapters::PgvectorStore.new")
+        expect(initializer).to include("config.embedder = Engram::Adapters::RubyLLMEmbedder.new\n")
       end
 
       it "creates the ActiveRecord model with neighbor wired in" do
@@ -77,6 +78,11 @@ if deps_available
       it "uses the requested embedding size in the migration" do
         expect(migration_path).not_to be_nil, "expected migration file to be generated but none was found"
         expect(migration_contents).to include("t.vector :embedding, limit: 768")
+      end
+
+      it "configures the embedder for the same embedding size" do
+        initializer = File.read(File.join(destination, "config/initializers/engram.rb"))
+        expect(initializer).to include("Engram::Adapters::RubyLLMEmbedder.new(dimensions: 768)")
       end
     end
 

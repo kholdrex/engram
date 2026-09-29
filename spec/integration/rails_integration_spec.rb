@@ -83,6 +83,26 @@ if deps_available
       expect(Engram::MemoryRecord.where(scope: "user:#{user.id}").count).to eq(1)
     end
 
+    it "refuses the default scope for an unsaved owner" do
+      expect { User.new(name: "Ada").memory }
+        .to raise_error(Engram::Error, /User must be saved before using memory/)
+      expect(Engram::MemoryRecord.count).to eq(0)
+    end
+
+    it "refuses the default scope for an unsaved owner with an assigned id" do
+      owner = User.create!(name: "Ada")
+
+      expect { User.new(id: owner.id, name: "Bob").memory }
+        .to raise_error(Engram::Error, /User must be saved before using memory/)
+    end
+
+    it "refuses the default scope for a destroyed owner" do
+      owner = User.create!(name: "Ada")
+      owner.destroy!
+
+      expect { owner.memory }.to raise_error(Engram::Error, /User must be saved before using memory/)
+    end
+
     it "isolates memories between owners" do
       ada = User.create!(name: "Ada")
       bob = User.create!(name: "Bob")

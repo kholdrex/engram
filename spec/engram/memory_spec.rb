@@ -111,6 +111,21 @@ RSpec.describe Engram::Memory do
     expect(memory.all).to be_empty
   end
 
+  it "does not send content rejected by the persistence policy to the embedder" do
+    expect(embedder).not_to receive(:embed)
+
+    expect(memory.add("User API key is fake-token-abcdef")).to be_nil
+  end
+
+  it "sends only redacted content to the embedder on add" do
+    Engram.config.before_persist = lambda do |record|
+      record.with(content: record.content.gsub("billing@example.test", "[REDACTED]"))
+    end
+    expect(embedder).to receive(:embed).once.with("User billing email is [REDACTED]").and_call_original
+
+    memory.add("User billing email is billing@example.test")
+  end
+
   it "applies the configured before_persist hook on add" do
     Engram.config.before_persist = lambda do |record|
       record.with(content: record.content.gsub("billing@example.test", "[REDACTED]"))

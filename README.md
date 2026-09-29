@@ -140,6 +140,9 @@ current_user.memory.add("Works at Acme Corp", kind: :fact)
 current_user.memory.recall("where does the user work?")
 ```
 
+The default scope needs a persisted record; calling `memory` on a new or destroyed owner
+raises `Engram::Error`. Pass `has_memory scope: -> { ... }` to use a different key.
+
 Run automatic observation off the request path:
 
 ```ruby
@@ -387,6 +390,11 @@ Engram.configure do |config|
   )
 end
 ```
+
+`Memory#add` runs `before_persist` and the policy before computing the embedding, so rejected
+or redacted text is never sent to the embedder, and hooks receive a record without an
+embedding. `observe` is different: the conversation goes to the completion provider, and
+extracted facts are embedded for consolidation before hooks and policy run.
 
 Write-content filtering and transformation are not deletion authorization. A consolidation
 `forget` decision still validates scope, target existence, candidate integrity, and provenance, but it does not run
