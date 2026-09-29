@@ -31,6 +31,7 @@ require_relative "engram/use_cases/recall"
 require_relative "engram/use_cases/inject"
 require_relative "engram/use_cases/observe"
 require_relative "engram/use_cases/forget"
+require_relative "engram/use_cases/update"
 require_relative "engram/use_cases/forget_expired"
 require_relative "engram/use_cases/rebuild_embeddings"
 require_relative "engram/use_cases/source_impact"
@@ -64,6 +65,9 @@ module Engram
 
   # Raised when a live claim suppresses an observation that has not completed.
   class ObservationInProgressError < Error; end
+
+  # Raised when a correction targets a memory absent from the caller's scope.
+  class MemoryNotFoundError < Error; end
 
   class << self
     def config

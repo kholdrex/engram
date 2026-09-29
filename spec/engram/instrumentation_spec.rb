@@ -31,6 +31,44 @@ RSpec.describe "Engram instrumentation" do
     expect(result).to eq("ok")
   end
 
+  it "emits one update event with field names and outcomes without sensitive values" do
+    memory = Engram::Memory.new(scope: "u:1", store: store, embedder: embedder)
+    record = memory.add("Paris", metadata: {"private" => "value"})
+    events.clear
+
+    memory.update(id: record.id, content: "Berlin", metadata: {"secret" => "value"})
+
+    expect(events.size).to eq(1)
+    name, payload = events.first
+    expect(name).to eq("update.engram")
+    expect(payload).to match(
+      store_adapter: "Engram::Adapters::InMemoryStore", scope_identifier: "u:1",
+      fields: %w[content metadata], outcome: "updated", content_changed: true, reembedded: true,
+      duration_ms: be_a(Numeric)
+    )
+  end
+
+  it "reports retained embeddings and rejected and missing updates" do
+    memory = Engram::Memory.new(scope: "u:1", store: store, embedder: embedder)
+    record = memory.add("Paris")
+    events.clear
+
+    memory.update(id: record.id, importance: 2)
+    expect(events.last.last).to include(outcome: "updated", content_changed: false, reembedded: false)
+    Engram.config.before_persist = ->(_) {}
+    memory.update(id: record.id, content: "Berlin")
+    expect(events.last.last).to include(outcome: "rejected", content_changed: true, reembedded: false)
+    expect { memory.update(id: -1, importance: 2) }.to raise_error(Engram::MemoryNotFoundError)
+    expect(events.last.last).to include(outcome: "missing", content_changed: false, reembedded: false)
+    expect(events.map(&:first)).to eq(["update.engram"] * 3)
+  end
+
+  it "does not emit update events for invalid arguments" do
+    memory = Engram::Memory.new(scope: "u:1", store: store, embedder: embedder)
+    expect { memory.update(id: 1) }.to raise_error(ArgumentError)
+    expect(events).to be_empty
+  end
+
   it "emits recall metrics without query or memory content" do
     store.add(Engram::Record.new(content: "User likes tea", scope: "u:1", embedding: embedder.embed("User likes tea")))
 
