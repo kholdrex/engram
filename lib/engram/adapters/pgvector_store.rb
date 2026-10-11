@@ -109,6 +109,12 @@ module Engram
         query.order(:id).limit(limit).pluck(:id)
       end
 
+      def delete_many(scope:, ids:)
+        return 0 if ids.empty?
+
+        model.where(scope: scope, id: ids).delete_all
+      end
+
       def delete_expired(scope:, ids:, at:)
         return 0 if ids.empty? || !expiry_column?
 

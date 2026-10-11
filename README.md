@@ -76,7 +76,7 @@ explicitly version-gated:
 - Core types and facade: `Engram::Memory`, `Engram::Record`, `Engram::Decision`, `Engram::PersistencePolicy`, and `Engram.with_memory`.
 - Store and adapter ports: `Engram::Ports::MemoryStore`, `Engram::Ports::Embedder`, `Engram::Ports::Completion`.
 - Rails integration points: `has_memory`, `Memory#observe_later`, and generator outputs under `engram:` rake tasks.
-- Lifecycle methods in `Engram::Memory`: `add`, `update`, `recall`, `inject_into`, `observe`, `observe_later`, `forget`, `forget_stale`, `forget_expired`, `rebuild_embeddings`, and `memories_from_source`.
+- Lifecycle methods in `Engram::Memory`: `add`, `update`, `all`, `each_memory`, `recall`, `inject_into`, `observe`, `observe_later`, `forget`, `forget_all`, `forget_stale`, `forget_expired`, `rebuild_embeddings`, and `memories_from_source`.
 - RubyLLM adapter contract points and evaluator entrypoints (`rake eval`, `rake eval:real`).
 
 ### Backward-compatibility commitments (pre-1.0)
@@ -663,6 +663,47 @@ Errors stop the run; completed batches stay deleted and a retry can process the 
 Custom stores need the optional `expired_ids` and `delete_expired` methods for cleanup.
 The `forget_expired.engram` event reports counts without memory content or IDs.
 
+### Erasing or exporting a user's memory
+
+To delete everything Engram stores for one owner, preview the count, then run it:
+
+```ruby
+user.memory.forget_all(dry_run: true)
+# => {matched: 87, deleted: 0, dry_run: true}
+user.memory.forget_all(batch_size: 500)
+# => {matched: 87, deleted: 87, dry_run: false}
+```
+
+```sh
+DRY_RUN=true bin/rails 'engram:forget_all[user:42]'
+bin/rails 'engram:forget_all[user:42]'
+```
+
+`forget_all` deletes expired memories too and, like `forget(id:)`, bypasses hooks and policies.
+It only removes rows in the memory store. Before running it for an erasure request:
+
+1. Stop new `observe` and `observe_later` calls for the owner, and let queued `ObserveJob`s
+   finish or remove them. Otherwise they can write new memories during or after the erasure.
+2. Run `forget_all`. Memories added while it runs may or may not be deleted, so check
+   `memory.all` afterwards.
+3. Delete conversation transcripts and other source data your app keeps; Engram does not
+   store them. Processed-turn markers in the cache expire on their own and hold no content.
+
+To export, iterate in batches and write the fields you need:
+
+```ruby
+File.open("memories.jsonl", "w") do |file|
+  user.memory.each_memory(batch_size: 500) do |record|
+    file.puts({id: record.id, kind: record.kind, content: record.content,
+      created_at: record.created_at, expires_at: record.expires_at}.to_json)
+  end
+end
+```
+
+Custom stores can implement the optional `delete_many(scope:, ids:)` to delete a batch in one
+call; without it, `forget_all` deletes one id at a time. The `forget_all.engram` event reports
+counts without memory content or IDs.
+
 ### Observation and maintenance
 
 Observation uses a scope-and-turn claim before extraction. While a claim lease is live and
@@ -752,6 +793,7 @@ main memory pipeline:
 - `update.engram`
 - `forget.engram`
 - `forget_expired.engram`
+- `forget_all.engram`
 - `recall.engram`
 - `inject.engram`
 - `observe.engram`

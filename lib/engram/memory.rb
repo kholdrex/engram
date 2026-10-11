@@ -129,6 +129,12 @@ module Engram
       end
     end
 
+    # Delete every memory in this scope in batches. Returns matched and deleted counts.
+    # Bypasses extraction, consolidation, and persistence hooks, like #forget.
+    def forget_all(batch_size: 100, dry_run: false)
+      UseCases::ForgetAll.new(store: @store).call(scope: scope, batch_size: batch_size, dry_run: dry_run)
+    end
+
     # Recompute embeddings (and embedding metadata) for memories in the scope.
     # When `stale_only` is true, only records whose current metadata does not match the
     # active embedder are rebuilt.

@@ -155,6 +155,17 @@ if deps_available
       )
     end
 
+    it "deletes a whole scope in batches without touching other owners" do
+      3.times { |i| store.add(rec("fact #{i}", embedding: [1.0, 0.0, 0.0])) }
+      other = store.add(rec("other owner", embedding: [1.0, 0.0, 0.0], scope: "u:2"))
+      memory = Engram::Memory.new(scope: "u:1", store: store, embedder: Engram::Adapters::NullEmbedder.new(dimensions: 3))
+
+      expect(memory.forget_all(batch_size: 2)).to eq(matched: 3, deleted: 3, dry_run: false)
+      expect(store.all(scope: "u:1")).to eq([])
+      expect(store.all(scope: "u:2").map(&:id)).to eq([other.id])
+      expect(store.delete_many(scope: "u:1", ids: [other.id])).to eq(0)
+    end
+
     it "pages one scope in id order through the facade" do
       records = Array.new(5) { |i| store.add(rec("fact #{i}", embedding: [1.0, 0.0, 0.0])) }
       store.add(rec("other owner", embedding: [1.0, 0.0, 0.0], scope: "u:2"))
