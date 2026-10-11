@@ -27,8 +27,6 @@ module Engram
           end
 
           batch.each(&block)
-          break if batch.size < batch_size
-
           after_id = batch.last.id
         end
         nil

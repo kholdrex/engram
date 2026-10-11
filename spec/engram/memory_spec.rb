@@ -277,12 +277,24 @@ RSpec.describe Engram::Memory do
       ids = records.map(&:id)
 
       expect(memory.each_memory(batch_size: 2).map(&:id)).to eq(ids)
-      expect(store.pages).to eq([[2, nil], [2, ids[1]], [2, ids[3]]])
+      expect(store.pages).to eq([[2, nil], [2, ids[1]], [2, ids[3]], [2, ids[4]]])
     end
 
-    it "stops after a short page without an extra store call" do
+    it "stops at the first empty page" do
       expect(memory.each_memory(batch_size: 10).count).to eq(5)
-      expect(store.pages).to eq([[10, nil]])
+      expect(store.pages).to eq([[10, nil], [10, records.last.id]])
+    end
+
+    it "reads past short pages from stores that cap the page size" do
+      capped = Class.new(Engram::Adapters::InMemoryStore) do
+        def all(scope:, limit: nil, offset: 0, after_id: nil)
+          super(scope: scope, limit: limit && [limit, 2].min, offset: offset, after_id: after_id)
+        end
+      end.new
+      capped_memory = Engram::Memory.new(scope: "user:1", store: capped, embedder: embedder)
+      ids = Array.new(5) { |i| capped_memory.add("fact #{i}").id }
+
+      expect(capped_memory.each_memory(batch_size: 10).map(&:id)).to eq(ids)
     end
 
     it "includes expired memories" do
