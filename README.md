@@ -404,6 +404,21 @@ implementing `allow_destructive?(record)` and returning exactly `true` or `false
 that only implement `call` affect writes but do not prevent deletion. The built-in policy uses
 this separate hook to retain its ungrounded-provenance protection.
 
+### Listing memories
+
+`memory.all` returns every memory in the scope, including expired ones. For large scopes, read
+one page at a time or iterate in batches:
+
+```ruby
+page = memory.all(limit: 50)
+next_page = memory.all(limit: 50, after_id: page.last.id)
+
+memory.each_memory(batch_size: 500) { |record| export(record) }
+```
+
+Both return memories in id order. A custom store whose `all` does not accept `limit:` and
+`after_id:` is read in a single call.
+
 ### Correcting memories
 
 ```ruby
