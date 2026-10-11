@@ -155,6 +155,15 @@ if deps_available
       )
     end
 
+    it "pages one scope in id order through the facade" do
+      records = Array.new(5) { |i| store.add(rec("fact #{i}", embedding: [1.0, 0.0, 0.0])) }
+      store.add(rec("other owner", embedding: [1.0, 0.0, 0.0], scope: "u:2"))
+      memory = Engram::Memory.new(scope: "u:1", store: store, embedder: Engram::Adapters::NullEmbedder.new(dimensions: 3))
+
+      expect(memory.each_memory(batch_size: 2).map(&:id)).to eq(records.map(&:id))
+      expect(memory.all(limit: 2, after_id: records[1].id).map(&:id)).to eq(records[2, 2].map(&:id))
+    end
+
     it "finds scoped records including expired ones without touching access time" do
       record = store.add(rec("expired", embedding: [1.0, 0.0, 0.0]).with(expires_at: Time.now - 60))
       accessed = Time.utc(2026, 1, 1)

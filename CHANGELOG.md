@@ -11,6 +11,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   keeping its id and timestamps. It returns the stored record, `nil` when `before_persist` or
   the policy rejects the edit, and raises `Engram::MemoryNotFoundError` for an unknown id.
   Content changes re-embed the memory and remove its provenance. Emits `update.engram`.
+- `Memory#all(limit:, after_id:)` reads one page of memories in id order, and
+  `Memory#each_memory(batch_size:)` iterates a scope in batches. `all` without arguments is
+  unchanged.
 - Optional `MemoryStore#find(scope:, id:)`. The in-memory and pgvector stores implement it;
   custom stores without it fall back to scanning `all`.
 

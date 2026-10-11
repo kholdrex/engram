@@ -93,15 +93,35 @@ module Engram
       end
     end
 
-    def all
-      @store.all(scope: scope)
+    # Memories in this scope, including expired ones. Pass limit and after_id (the last id of
+    # the previous page) to read one page in id order.
+    def all(limit: nil, after_id: nil)
+      return @store.all(scope: scope) if limit.nil? && after_id.nil?
+      if !limit.nil? && !(limit.is_a?(Integer) && limit.positive?)
+        raise ArgumentError, "limit must be a positive integer"
+      end
+      if !after_id.nil? && !valid_id?(after_id)
+        raise ArgumentError, "after_id must be an Integer or a non-empty String"
+      end
+
+      @store.all(scope: scope, limit: limit, after_id: after_id)
+    end
+
+    # Yield every memory in this scope in id order, loading batch_size records at a time.
+    # Returns an Enumerator without a block.
+    def each_memory(batch_size: 100, &block)
+      unless batch_size.is_a?(Integer) && batch_size.positive?
+        raise ArgumentError, "batch_size must be a positive integer"
+      end
+      return enum_for(:each_memory, batch_size: batch_size) unless block
+
+      UseCases::EachMemory.new(store: @store).call(scope: scope, batch_size: batch_size, &block)
     end
 
     # Delete one memory in this scope. Returns 1 when deleted, or 0 when missing.
     # Explicit deletion bypasses extraction, consolidation, and persistence hooks.
     def forget(id:)
-      valid_id = id.instance_of?(Integer) || (id.instance_of?(String) && id.valid_encoding? && !id.strip.empty?)
-      raise ArgumentError, "id must be an Integer or a non-empty String" unless valid_id
+      raise ArgumentError, "id must be an Integer or a non-empty String" unless valid_id?(id)
 
       payload = Engram::Instrumentation.payload(scope: scope, store: @store)
       Engram::Instrumentation.instrument("forget", payload) do
@@ -150,6 +170,10 @@ module Engram
     end
 
     private
+
+    def valid_id?(id)
+      id.instance_of?(Integer) || (id.instance_of?(String) && id.valid_encoding? && !id.strip.empty?)
+    end
 
     def persist(record)
       Persistence.new(store: @store, embedder: @embedder).add(record)

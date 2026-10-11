@@ -237,6 +237,122 @@ RSpec.describe Engram::Memory do
     expect(memory.all).to be_empty
   end
 
+  describe "#all and #each_memory" do
+    let!(:records) { Array.new(5) { |i| memory.add("fact #{i}") } }
+
+    it "keeps returning every memory, including expired ones, without arguments" do
+      expired = memory.add("trial", expires_at: Time.now - 1)
+
+      expect(memory.all.map(&:id)).to eq(records.map(&:id) + [expired.id])
+    end
+
+    it "returns one page in id order" do
+      first = memory.all(limit: 2)
+      second = memory.all(limit: 2, after_id: first.last.id)
+
+      expect(first.map(&:id)).to eq(records.first(2).map(&:id))
+      expect(second.map(&:id)).to eq(records[2, 2].map(&:id))
+    end
+
+    [{limit: 0}, {limit: 1.5}, {limit: "2"}, {after_id: ""}, {after_id: [1]}].each do |options|
+      it "rejects #{options.inspect} before calling the store" do
+        expect(store).not_to receive(:all)
+
+        expect { memory.all(**options) }.to raise_error(ArgumentError)
+      end
+    end
+
+    let(:store) do
+      Class.new(Engram::Adapters::InMemoryStore) do
+        attr_reader :pages
+
+        def all(scope:, limit: nil, offset: 0, after_id: nil)
+          (@pages ||= []) << [limit, after_id] if limit
+          super
+        end
+      end.new
+    end
+
+    it "yields every memory across batches in id order" do
+      ids = records.map(&:id)
+
+      expect(memory.each_memory(batch_size: 2).map(&:id)).to eq(ids)
+      expect(store.pages).to eq([[2, nil], [2, ids[1]], [2, ids[3]]])
+    end
+
+    it "stops after a short page without an extra store call" do
+      expect(memory.each_memory(batch_size: 10).count).to eq(5)
+      expect(store.pages).to eq([[10, nil]])
+    end
+
+    it "includes expired memories" do
+      expired = memory.add("trial", expires_at: Time.now - 1)
+
+      expect(memory.each_memory.map(&:id)).to include(expired.id)
+    end
+
+    [0, -1, 1.5, nil].each do |batch_size|
+      it "rejects batch_size #{batch_size.inspect} even without a block" do
+        expect { memory.each_memory(batch_size: batch_size) }.to raise_error(ArgumentError, /batch_size/)
+      end
+    end
+
+    it "reads stores without keyset pagination in one call" do
+      legacy = Class.new do
+        def initialize(records) = @records = records
+
+        def all(scope:) = @records
+      end.new(records)
+      legacy_memory = Engram::Memory.new(scope: "user:1", store: legacy, embedder: embedder)
+
+      expect(legacy_memory.each_memory(batch_size: 2).map(&:id)).to eq(records.map(&:id))
+    end
+
+    it "sorts records from stores without keyset pagination" do
+      legacy = Class.new do
+        def initialize(records) = @records = records
+
+        def all(scope:) = @records
+      end.new(records.reverse)
+      legacy_memory = Engram::Memory.new(scope: "user:1", store: legacy, embedder: embedder)
+
+      expect(legacy_memory.each_memory(batch_size: 1).map(&:id)).to eq(records.map(&:id))
+    end
+
+    {
+      "cycles between pages" => ->(ids, after_id, _limit) { (after_id == ids[1]) ? ids[2, 2] : ids[0, 2] },
+      "overlapping pages" => ->(ids, after_id, limit) { after_id ? ids.drop(ids.index(after_id)).first(limit) : ids.first(limit) },
+      "unordered pages" => ->(ids, _after_id, limit) { ids.first(limit).reverse }
+    }.each do |name, pager|
+      it "raises on #{name}" do
+        broken = Class.new do
+          def initialize(records, pager) = (@records, @pager = records, pager)
+
+          def all(scope:, limit: nil, offset: 0, after_id: nil)
+            ids = @pager.call(@records.map(&:id), after_id, limit)
+            ids.map { |id| @records.find { |record| record.id == id } }
+          end
+        end.new(records, pager)
+        broken_memory = Engram::Memory.new(scope: "user:1", store: broken, embedder: embedder)
+
+        expect { broken_memory.each_memory(batch_size: 2).first(20) }
+          .to raise_error(Engram::Error, /advance by id/)
+      end
+    end
+
+    it "raises instead of looping when a store ignores after_id" do
+      stuck = Class.new do
+        def initialize(records) = @records = records
+
+        def all(scope:, limit: nil, offset: 0, after_id: nil) = @records.first(limit || @records.size)
+      end.new(records)
+      stuck_memory = Engram::Memory.new(scope: "user:1", store: stuck, embedder: embedder)
+
+      expect { stuck_memory.each_memory(batch_size: 2).to_a }
+        .to raise_error(Engram::Error, /advance by id/)
+    end
+  end
+
   describe "#forget" do
     it "deletes one memory and stops recalling it" do
       deleted = memory.add("prefers tea")
