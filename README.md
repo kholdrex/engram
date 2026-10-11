@@ -420,7 +420,8 @@ The edit goes through `before_persist` and the persistence policy like a new mem
 policy that implements `allow_destructive?` must also allow replacing the original record.
 Expired memories can be updated too. `update` returns the stored record, `nil` if the hook or policy rejects it (the stored memory is
 left unchanged), and raises `Engram::MemoryNotFoundError` if the id is not in this scope.
-The embedding is recomputed only when the content changes.
+The embedding is recomputed when the content changes, or generated if the stored memory has
+no embedding.
 
 Changing the content removes the record's provenance, because the old sources no longer
 support the new text. Other edits keep it.
