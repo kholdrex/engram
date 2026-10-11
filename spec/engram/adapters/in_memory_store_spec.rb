@@ -28,6 +28,30 @@ RSpec.describe Engram::Adapters::InMemoryStore do
     expect(store.all(scope: "u:1")).to contain_exactly(r)
   end
 
+  it "finds scoped records including expired ones without touching access time" do
+    accessed = Time.utc(2025, 1, 1)
+    record = store.add(rec("expired", scope: "u:1", embedding: [1.0, 0.0])
+      .with(expires_at: Time.now - 60, last_accessed_at: accessed))
+
+    expect(store.find(scope: "u:1", id: record.id)).to equal(record)
+    expect(record.last_accessed_at).to eq(accessed)
+    expect(store.find(scope: "u:2", id: record.id)).to be_nil
+    expect(store.find(scope: "u:1", id: -1)).to be_nil
+  end
+
+  it "preserves timestamps at write time despite stale or forged replacement timestamps" do
+    record = store.add(rec("old", scope: "u:1", embedding: [1.0, 0.0]))
+    replacement = record.with(content: "new", created_at: Time.now + 60, last_accessed_at: Time.now + 120)
+    accessed = Time.utc(2026, 1, 1)
+    store.touch(scope: "u:1", id: record.id, at: accessed)
+
+    updated = store.update(scope: "u:1", id: record.id, record: replacement)
+
+    expect(updated.created_at).to eq(record.created_at)
+    expect(updated.last_accessed_at).to eq(accessed)
+    expect(store.find(scope: "u:1", id: record.id)).to equal(updated)
+  end
+
   it "excludes expired matches before ranking and limiting, but keeps them available for inspection" do
     now = Time.utc(2026, 9, 15, 12)
     allow(Time).to receive(:now).and_return(now)

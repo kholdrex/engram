@@ -5,8 +5,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- `Memory#update(id:, ...)` changes the given attributes of a memory in the current scope,
+  keeping its id and timestamps. It returns the stored record, `nil` when `before_persist` or
+  the policy rejects the edit, and raises `Engram::MemoryNotFoundError` for an unknown id.
+  Content changes re-embed the memory and remove its provenance. Emits `update.engram`.
+- Optional `MemoryStore#find(scope:, id:)`. The in-memory and pgvector stores implement it;
+  custom stores without it fall back to scanning `all`.
+
 ### Fixed
 
+- `InMemoryStore#update` keeps the stored `created_at` and `last_accessed_at`, matching the
+  pgvector store.
 - `Memory#add` no longer sends content to the embedder before `before_persist` and the
   persistence policy run. Rejected text is not embedded, and redacted text is embedded once,
   after redaction.

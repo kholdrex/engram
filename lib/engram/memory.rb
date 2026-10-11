@@ -4,6 +4,9 @@ module Engram
   # The friendly facade. Bound to one `scope` (an owner), it wires the configured store
   # and embedder into the use cases. This is what `user.memory` returns in Rails.
   class Memory
+    UNSET = Object.new.freeze
+    private_constant :UNSET
+
     attr_reader :scope
 
     def initialize(scope:, store: Engram.config.store, embedder: Engram.config.embedder)
@@ -25,6 +28,13 @@ module Engram
           expires_at: expires_at
         ))
       end
+    end
+
+    # Correct supplied attributes of a memory in this scope. Omitted fields are kept.
+    def update(id:, content: UNSET, kind: UNSET, importance: UNSET, metadata: UNSET, expires_at: UNSET)
+      attributes = {content: content, kind: kind, importance: importance, metadata: metadata, expires_at: expires_at}
+        .reject { |_, value| value.equal?(UNSET) }
+      UseCases::Update.new(store: @store, embedder: @embedder).call(scope: scope, id: id, attributes: attributes)
     end
 
     # Return the most relevant memories for a query.

@@ -26,6 +26,12 @@ module Engram
         raise NotImplementedError, "#{self.class} must implement #all"
       end
 
+      # Optional scoped lookup, including expired records, without touching access time.
+      # Returns a Record or nil. Legacy adapters can fall back to #all.
+      def find(scope:, id:)
+        raise NotImplementedError, "#{self.class} does not implement #find"
+      end
+
       # Optional performance capability: return the subset of requested ids that
       # exists in `scope`, preserving each requested value's representation rather
       # than returning a store-native cast of it. Return at most one requested

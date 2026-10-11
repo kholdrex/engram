@@ -51,14 +51,20 @@ module Engram
         @mutex.synchronize { ids.uniq.select { |id| @records[id]&.scope == scope } }
       end
 
+      def find(scope:, id:)
+        @mutex.synchronize do
+          record = @records[id]
+          record if record&.scope == scope
+        end
+      end
+
       def update(scope:, id:, record:)
         @mutex.synchronize do
           existing = @records[id]
           raise Engram::Error, "no memory with id #{id.inspect} in scope #{scope.inspect}" unless existing&.scope == scope
           raise Engram::Error, "cannot move memory across scopes" unless record.scope == scope
 
-          record.id = id
-          @records[id] = record
+          @records[id] = record.with(id: id, created_at: existing.created_at, last_accessed_at: existing.last_accessed_at)
         end
       end
 

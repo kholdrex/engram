@@ -155,6 +155,53 @@ if deps_available
       )
     end
 
+    it "finds scoped records including expired ones without touching access time" do
+      record = store.add(rec("expired", embedding: [1.0, 0.0, 0.0]).with(expires_at: Time.now - 60))
+      accessed = Time.utc(2026, 1, 1)
+      store.touch(scope: "u:1", id: record.id, at: accessed)
+
+      found = store.find(scope: "u:1", id: record.id.to_s)
+      expect(found.id).to eq(record.id)
+      expect(found.content).to eq("expired")
+      expect(found.embedding).to eq(record.embedding)
+      expect(found.expires_at).to eq(record.expires_at)
+      expect(found.last_accessed_at).to eq(accessed)
+      expect(Engram::MemoryRecord.find(record.id).last_accessed_at).to eq(accessed)
+      expect(store.find(scope: "u:2", id: record.id)).to be_nil
+      expect(store.find(scope: "u:1", id: -1)).to be_nil
+    end
+
+    it "round-trips scoped facade corrections while preserving identity and timestamps" do
+      embedder = Object.new
+      def embedder.embed(_text) = [0.0, 1.0, 0.0]
+      def embedder.embedding_metadata = {adapter: "test", model: "correction", dimensions: 3}
+      memory = Engram::Memory.new(scope: "u:1", store: store, embedder: embedder)
+      record = store.add(rec("Paris", embedding: [1.0, 0.0, 0.0], metadata: {"old" => true})
+        .with(expires_at: Time.now - 60))
+      accessed = Time.utc(2026, 1, 1)
+      store.touch(scope: "u:1", id: record.id, at: accessed)
+
+      updated = memory.update(id: record.id.to_s, content: "Berlin", kind: :preference,
+        importance: 2.5, metadata: {"city" => "Berlin"}, expires_at: nil)
+      loaded = store.find(scope: "u:1", id: record.id)
+
+      expect(updated.to_h).to eq(loaded.to_h)
+      expect(loaded.id).to eq(record.id)
+      expect(loaded.content).to eq("Berlin")
+      expect(loaded.kind).to eq(:preference)
+      expect(loaded.importance).to eq(2.5)
+      expect(loaded.metadata).to include("city" => "Berlin")
+      expect(loaded.metadata).not_to have_key("old")
+      expect(loaded.metadata.dig("_engram", "embedding", "model")).to eq("correction")
+      expect(loaded.embedding).to eq([0.0, 1.0, 0.0])
+      expect(loaded.expires_at).to be_nil
+      expect(loaded.created_at).to eq(record.created_at)
+      expect(loaded.last_accessed_at).to eq(accessed)
+      expect { memory.update(id: -1, importance: 1) }.to raise_error(Engram::MemoryNotFoundError)
+      other = Engram::Memory.new(scope: "u:2", store: store, embedder: embedder)
+      expect { other.update(id: record.id, importance: 1) }.to raise_error(Engram::MemoryNotFoundError)
+    end
+
     def embedding_metadata(model: "model-a", dimensions: 3)
       Engram::EmbeddingMetadata.build(
         adapter: "test-adapter",

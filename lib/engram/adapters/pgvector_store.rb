@@ -69,6 +69,11 @@ module Engram
         end
       end
 
+      def find(scope:, id:)
+        row = model.find_by(scope: scope, id: id)
+        to_record(row) if row
+      end
+
       def update(scope:, id:, record:)
         raise Engram::Error, "cannot move memory across scopes" unless record.scope == scope
 

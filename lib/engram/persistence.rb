@@ -48,21 +48,30 @@ module Engram
     # Applies all write transformations without mutating the store. Input is validated
     # before callbacks can remove or replace provenance, and final output is validated too.
     def prepare(record)
-      original_provenance = validate_provenance!(record)
       original_content = record.content
-      record = @before_persist.call(record) if @before_persist
-      if record
-        transformed_provenance = validate_provenance!(record)
-        validate_provenance_trust!(original_provenance, transformed_provenance) if @before_persist
-      end
-      record = @persistence_policy.call(record) if record && @persistence_policy
-      validate_provenance!(record) if record
+      record = transform(record)
       # Embed only after hooks and policy so rejected or redacted text never reaches the embedder.
       if record && (record.embedding.nil? || record.content != original_content)
         record = record.with(embedding: @embedder.embed(record.content))
       end
       record = Engram::EmbeddingMetadata.attach(record, embedder: @embedder) if record
       validate_provenance!(record) if record
+      record
+    end
+
+    # Runs before_persist and the policy without embedding. Memory#update passes a block
+    # that runs after each step to check the result and drop invalidated provenance.
+    def transform(record)
+      original_provenance = validate_provenance!(record)
+      record = @before_persist.call(record) if @before_persist
+      if record
+        transformed_provenance = validate_provenance!(record)
+        validate_provenance_trust!(original_provenance, transformed_provenance) if @before_persist
+      end
+      record = yield(record) if record && block_given?
+      record = @persistence_policy.call(record) if record && @persistence_policy
+      validate_provenance!(record) if record
+      record = yield(record) if record && block_given?
       record
     end
 
