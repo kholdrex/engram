@@ -365,6 +365,64 @@ RSpec.describe Engram::Memory do
     end
   end
 
+  describe "#forget_all" do
+    let!(:records) { Array.new(5) { |i| memory.add("fact #{i}") } }
+    let!(:other) { store.add(Engram::Record.new(content: "other", scope: "user:2", embedding: embedder.embed("other"))) }
+
+    it "counts without deleting on a dry run" do
+      expect(memory.forget_all(batch_size: 2, dry_run: true)).to eq(matched: 5, deleted: 0, dry_run: true)
+      expect(memory.all.size).to eq(5)
+    end
+
+    it "deletes every memory in the scope, including expired ones, and nothing else" do
+      memory.add("trial", expires_at: Time.now - 1)
+
+      expect(memory.forget_all(batch_size: 2)).to eq(matched: 6, deleted: 6, dry_run: false)
+      expect(memory.all).to eq([])
+      expect(store.all(scope: "user:2").map(&:id)).to eq([other.id])
+    end
+
+    it "does not run hooks, policy, or the embedder" do
+      Engram.config.before_persist = ->(_) { raise "must not run" }
+      Engram.config.persistence_policy = ->(_) { raise "must not run" }
+      expect(embedder).not_to receive(:embed)
+
+      expect(memory.forget_all[:deleted]).to eq(5)
+    end
+
+    it "deletes everything from stores that cap the page size" do
+      capped = Class.new(Engram::Adapters::InMemoryStore) do
+        def all(scope:, limit: nil, offset: 0, after_id: nil)
+          super(scope: scope, limit: limit && [limit, 2].min, offset: offset, after_id: after_id)
+        end
+      end.new
+      capped_memory = Engram::Memory.new(scope: "user:1", store: capped, embedder: embedder)
+      5.times { |i| capped_memory.add("fact #{i}") }
+
+      expect(capped_memory.forget_all(batch_size: 10)).to eq(matched: 5, deleted: 5, dry_run: false)
+      expect(capped.all(scope: "user:1")).to eq([])
+    end
+
+    it "deletes one id at a time for stores without delete_many" do
+      legacy = Class.new(Engram::Adapters::InMemoryStore) do
+        undef_method :delete_many
+      end.new
+      legacy_memory = Engram::Memory.new(scope: "user:1", store: legacy, embedder: embedder)
+      3.times { |i| legacy_memory.add("fact #{i}") }
+
+      expect(legacy_memory.forget_all(batch_size: 2)).to eq(matched: 3, deleted: 3, dry_run: false)
+      expect(legacy_memory.all).to eq([])
+    end
+
+    [{batch_size: 0}, {batch_size: nil}, {dry_run: "true"}, {dry_run: nil}].each do |options|
+      it "rejects #{options.inspect} before touching the store" do
+        expect(store).not_to receive(:all)
+
+        expect { memory.forget_all(**options) }.to raise_error(ArgumentError)
+      end
+    end
+  end
+
   describe "#forget" do
     it "deletes one memory and stops recalling it" do
       deleted = memory.add("prefers tea")

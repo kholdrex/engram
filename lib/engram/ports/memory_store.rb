@@ -56,6 +56,12 @@ module Engram
         raise NotImplementedError, "#{self.class} must implement #delete"
       end
 
+      # Optional bulk deletion: delete the requested IDs that exist in scope and return the
+      # deleted count. Callers fall back to #delete for adapters without it.
+      def delete_many(scope:, ids:)
+        raise NotImplementedError, "#{self.class} does not implement #delete_many"
+      end
+
       # Optional expiry maintenance: up to `limit` IDs with expires_at <= at,
       # ordered by ID, strictly after after_id. Never includes nil expiry.
       def expired_ids(scope:, at:, limit:, after_id: nil)

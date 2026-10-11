@@ -74,6 +74,16 @@ RSpec.describe Engram::Adapters::InMemoryStore do
     expect(store.search(embedding: [1.0, 0.0], scope: "u:1", limit: 1).first.expires_at).to be_nil
   end
 
+  it "deletes only requested IDs in scope and counts duplicates once" do
+    mine = store.add(rec("mine", scope: "u:1", embedding: [1.0, 0.0]))
+    kept = store.add(rec("kept", scope: "u:1", embedding: [1.0, 0.0]))
+    other = store.add(rec("other", scope: "u:2", embedding: [1.0, 0.0]))
+
+    expect(store.delete_many(scope: "u:1", ids: [mine.id, mine.id, other.id, -1])).to eq(1)
+    expect(store.all(scope: "u:1").map(&:id)).to eq([kept.id])
+    expect(store.all(scope: "u:2").map(&:id)).to eq([other.id])
+  end
+
   it "rechecks scope and expiry when deleting requested IDs" do
     now = Time.now
     expired = store.add(rec("expired", scope: "u:1", embedding: [1.0, 0.0]).with(expires_at: now))

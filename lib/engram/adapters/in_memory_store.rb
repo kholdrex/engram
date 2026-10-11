@@ -96,6 +96,17 @@ module Engram
         end
       end
 
+      def delete_many(scope:, ids:)
+        @mutex.synchronize do
+          ids.uniq.count do |id|
+            next false unless @records[id]&.scope == scope
+
+            @records.delete(id)
+            true
+          end
+        end
+      end
+
       def delete_expired(scope:, ids:, at:)
         @mutex.synchronize do
           ids.uniq.count do |id|

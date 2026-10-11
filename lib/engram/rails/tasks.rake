@@ -18,6 +18,21 @@ namespace :engram do
     puts "matched=#{result[:matched]} deleted=#{result[:deleted]} dry_run=#{result[:dry_run]}"
   end
 
+  desc "Delete every memory in a scope. Usage: bundle exec rake 'engram:forget_all[user:1]'"
+  task :forget_all, [:scope] => :environment do |_, args|
+    scope = args[:scope]
+    raise ArgumentError, "forget_all requires a scope argument" if scope.to_s.empty?
+
+    dry_run = case ENV.fetch("DRY_RUN", "false").downcase
+    when "true", "1", "yes" then true
+    when "false", "0", "no" then false
+    else raise ArgumentError, "DRY_RUN must be true or false"
+    end
+    batch_size = Integer(ENV.fetch("BATCH_SIZE", "100"))
+    result = Engram::Memory.new(scope: scope).forget_all(batch_size: batch_size, dry_run: dry_run)
+    puts "matched=#{result[:matched]} deleted=#{result[:deleted]} dry_run=#{result[:dry_run]}"
+  end
+
   desc "Rebuild embeddings in a memory scope. Usage: bundle exec rake 'engram:rebuild_embeddings[user:1]'"
   task :rebuild_embeddings, [:scope] => :environment do |_, args|
     scope = args[:scope]

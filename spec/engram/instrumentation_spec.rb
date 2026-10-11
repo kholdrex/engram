@@ -167,6 +167,40 @@ RSpec.describe "Engram instrumentation" do
     expect(payload.keys).to contain_exactly(:matched, :deleted, :dry_run, :store_adapter, :duration_ms)
   end
 
+  it "reports batches deleted before a forget_all failure" do
+    failing = Class.new(Engram::Adapters::InMemoryStore) do
+      def delete_many(scope:, ids:)
+        @calls = @calls.to_i + 1
+        raise "store down" if @calls > 1
+
+        super
+      end
+    end.new
+    3.times { |i| failing.add(Engram::Record.new(content: "fact #{i}", scope: "u:1")) }
+
+    expect { Engram::Memory.new(scope: "u:1", store: failing).forget_all(batch_size: 2) }
+      .to raise_error("store down")
+    expect(events.fetch(0).last).to include(matched: 3, deleted: 2, dry_run: false)
+  end
+
+  it "reports single deletions before a forget_all failure in stores without delete_many" do
+    failing = Class.new(Engram::Adapters::InMemoryStore) do
+      undef_method :delete_many
+
+      def delete(scope:, id:)
+        @calls = @calls.to_i + 1
+        raise "store down" if @calls > 1
+
+        super
+      end
+    end.new
+    2.times { |i| failing.add(Engram::Record.new(content: "fact #{i}", scope: "u:1")) }
+
+    expect { Engram::Memory.new(scope: "u:1", store: failing).forget_all(batch_size: 2) }
+      .to raise_error("store down")
+    expect(events.fetch(0).last).to include(matched: 2, deleted: 1, dry_run: false)
+  end
+
   it "reports deletion counts without record ids, content, or raw scope" do
     Engram.config.instrumentation_scope_identifier = nil
     record = store.add(Engram::Record.new(content: "private memory", scope: "private scope"))

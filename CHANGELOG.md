@@ -14,6 +14,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `Memory#all(limit:, after_id:)` reads one page of memories in id order, and
   `Memory#each_memory(batch_size:)` iterates a scope in batches. `all` without arguments is
   unchanged.
+- `Memory#forget_all(batch_size:, dry_run:)` and the `engram:forget_all[scope]` task delete
+  every memory in a scope in batches and return matched/deleted counts. Emits
+  `forget_all.engram`. The README describes the full erasure steps and an export example.
+- Optional `MemoryStore#delete_many(scope:, ids:)`, implemented by the built-in stores; custom
+  stores without it fall back to `delete`.
 - Optional `MemoryStore#find(scope:, id:)`. The in-memory and pgvector stores implement it;
   custom stores without it fall back to scanning `all`.
 
